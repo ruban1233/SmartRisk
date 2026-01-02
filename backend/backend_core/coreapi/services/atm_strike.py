@@ -1,10 +1,18 @@
-# ATM Strike Calculation Service
-# Uses live LTP and pure math
-# No NSE, no external API
+import math
 
-def get_atm_strike(ltp, step=50):
+def get_atm_strike(ltp: float, symbol: str) -> int:
     """
-    ltp: live price (float)
-    step: strike gap (50 or 100)
+    Calculate ATM strike price based on LTP.
     """
-    return round(ltp / step) * step
+
+    symbol = symbol.upper()
+
+    if symbol == "NIFTY":
+        strike_gap = 50
+    elif symbol == "BANKNIFTY":
+        strike_gap = 100
+    else:
+        raise ValueError("Unsupported symbol")
+
+    atm = math.ceil(ltp / strike_gap) * strike_gap
+    return int(atm)
