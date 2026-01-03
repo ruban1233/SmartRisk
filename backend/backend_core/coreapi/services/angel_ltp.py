@@ -1,4 +1,4 @@
-from .angel_login import get_smart
+from coreapi.services.angel_session import get_smart_connection
 
 TOKEN_MAP = {
     "NIFTY": ("NSE", "NIFTY 50", "26000"),
@@ -6,19 +6,18 @@ TOKEN_MAP = {
 }
 
 
-def get_ltp(symbol):
+def get_ltp(symbol: str) -> float:
     symbol = symbol.upper()
 
     if symbol not in TOKEN_MAP:
-        raise ValueError("Unsupported symbol")
+        raise ValueError(f"Unsupported symbol: {symbol}")
 
     exchange, tradingsymbol, token = TOKEN_MAP[symbol]
 
-    smart = get_smart()
-    data = smart.ltpData(exchange, tradingsymbol, token)
+    smart = get_smart_connection()
+    response = smart.ltpData(exchange, tradingsymbol, token)
 
-    if not data or "data" not in data:
-        raise Exception(f"LTP failed: {data}")
+    if not response or "data" not in response:
+        raise Exception(f"LTP fetch failed: {response}")
 
-    return data["data"]["ltp"]
-
+    return float(response["data"]["ltp"])
