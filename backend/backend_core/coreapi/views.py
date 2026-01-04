@@ -5,7 +5,12 @@ from rest_framework import status
 from coreapi.services.angel_ltp import get_ltp
 from coreapi.services.atm_strike import get_atm_strike
 from coreapi.services.angel_candles import get_index_candles
+
 from coreapi.services.market_sentiment import market_sentiment_engine
+from coreapi.services.volatility_engine import volatility_engine
+from coreapi.services.traffic_light_engine import traffic_light_engine
+from coreapi.services.capital_risk_engine import capital_risk_engine
+from coreapi.services.strategy_engine import strategy_engine
 
 
 # -----------------------
@@ -17,7 +22,7 @@ def health(request):
 
 
 # -----------------------
-# Angel Login (handled in service)
+# Angel Login
 # -----------------------
 @api_view(["GET"])
 def angel_login(request):
@@ -25,7 +30,7 @@ def angel_login(request):
 
 
 # -----------------------
-# Market Status (placeholder)
+# Market Status
 # -----------------------
 @api_view(["GET"])
 def market_status(request):
@@ -41,7 +46,7 @@ def option_chain(request, symbol):
 
 
 # -----------------------
-# Dashboard (placeholder)
+# Dashboard
 # -----------------------
 @api_view(["GET"])
 def dashboard(request):
@@ -49,7 +54,7 @@ def dashboard(request):
 
 
 # -----------------------
-# Strategy (placeholder)
+# Strategy
 # -----------------------
 @api_view(["GET"])
 def strategy(request):
@@ -57,7 +62,7 @@ def strategy(request):
 
 
 # -----------------------
-# P/L Calculator (placeholder)
+# P/L Calculator
 # -----------------------
 @api_view(["POST"])
 def pl_calculator(request):
@@ -65,7 +70,7 @@ def pl_calculator(request):
 
 
 # -----------------------
-# Prices (placeholder)
+# Prices
 # -----------------------
 @api_view(["GET"])
 def prices(request):
@@ -73,7 +78,7 @@ def prices(request):
 
 
 # -----------------------
-# Test LTP (WORKING)
+# Test LTP
 # -----------------------
 @api_view(["GET"])
 def test_ltp_view(request):
@@ -83,7 +88,7 @@ def test_ltp_view(request):
 
 
 # -----------------------
-# ATM Strike (WORKING)
+# ATM Strike
 # -----------------------
 @api_view(["GET"])
 def atm_strike_view(request):
@@ -106,24 +111,18 @@ def atm_strike_view(request):
         })
 
     except Exception as e:
-        return Response(
-            {"error": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return Response({"error": str(e)}, status=500)
 
 
 # -----------------------
-# ✅ MARKET SENTIMENT (STEP-3 FINAL)
+# Market Sentiment API
 # -----------------------
 @api_view(["GET"])
 def market_sentiment_view(request):
     symbol = request.GET.get("symbol", "NIFTY").upper()
 
     if symbol not in ["NIFTY", "BANKNIFTY"]:
-        return Response(
-            {"error": "Invalid symbol. Use NIFTY or BANKNIFTY"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response({"error": "Invalid symbol"}, status=400)
 
     try:
         df = get_index_candles(symbol)
@@ -136,7 +135,60 @@ def market_sentiment_view(request):
         })
 
     except Exception as e:
-        return Response(
-            {"error": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        return Response({"error": str(e)}, status=500)
+
+
+# -----------------------
+# ✅ Unified SmartRisk API (STEP-8)
+# -----------------------
+@api_view(["GET"])
+def smartrisk_view(request):
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+    capital = float(request.GET.get("capital", 25000))
+
+    if symbol not in ["NIFTY", "BANKNIFTY"]:
+        return Response({"error": "Invalid symbol"}, status=400)
+
+    try:
+        # 1️⃣ Sentiment
+        candles_df = get_index_candles(symbol)
+        sentiment = market_sentiment_engine(candles_df)
+
+        # 2️⃣ Volatility (dummy IV for now)
+        volatility = volatility_engine([
+            {"iv": 14},
+            {"iv": 15},
+            {"iv": 16}
+        ])
+
+        # 3️⃣ Traffic Light
+        traffic = traffic_light_engine(
+            sentiment["trend"],
+            volatility["level"]
         )
+
+        # 4️⃣ Capital Risk
+        capital_info = capital_risk_engine(
+            capital,
+            traffic["risk_color"]
+        )
+
+        # 5️⃣ Strategy
+        strategy = strategy_engine(
+            sentiment["trend"],
+            volatility["level"],
+            traffic["risk_color"],
+            capital_info
+        )
+
+        return Response({
+            "symbol": symbol,
+            "sentiment": sentiment,
+            "volatility": volatility,
+            "traffic_light": traffic,
+            "capital": capital_info,
+            "strategy": strategy
+        })
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)

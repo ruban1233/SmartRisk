@@ -15,4 +15,6 @@ urlpatterns = [
 
     # ✅ STEP-3 MARKET SENTIMENT API
     path("market-sentiment/", views.market_sentiment_view),
+     path("smartrisk/", views.smartrisk_view),
+    
 ]
