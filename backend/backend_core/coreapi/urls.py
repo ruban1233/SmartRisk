@@ -11,7 +11,8 @@ urlpatterns = [
     path("pl/", views.pl_calculator),
     path("prices/", views.prices),
     path("test-ltp/", views.test_ltp_view),
-
-    # ✅ ADD THIS LINE
     path("atm-strike/", views.atm_strike_view),
+
+    # ✅ STEP-3 MARKET SENTIMENT API
+    path("market-sentiment/", views.market_sentiment_view),
 ]

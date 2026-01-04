@@ -10,34 +10,19 @@ CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
 MPIN = os.getenv("ANGEL_MPIN")
 TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
 
-_smart = None   # singleton
 
 def get_smart_connection():
-    global _smart
-
-    if _smart:
-        return _smart
-
     smart = SmartConnect(api_key=API_KEY)
 
     totp = pyotp.TOTP(TOTP_SECRET).now()
     data = smart.generateSession(CLIENT_ID, MPIN, totp)
 
     if not data or not data.get("data"):
-        raise Exception(f"Angel login failed: {data}")
+        raise Exception(f"Login failed: {data}")
 
-    jwt = data["data"]["jwtToken"]
+    jwt_token = data["data"]["jwtToken"]
 
-    # 🔥 CRITICAL FIX
-    if jwt.startswith("Bearer "):
-        jwt = jwt.replace("Bearer ", "")
+    # ✅ THIS IS THE ONLY THING REQUIRED
+    smart.setAccessToken(jwt_token)
 
-    smart.setAccessToken(jwt)
-
-    _smart = smart
     return smart
-def get_smartapi_client():
-    """
-    Standard wrapper used by other services
-    """
-    return get_smart_connection()
