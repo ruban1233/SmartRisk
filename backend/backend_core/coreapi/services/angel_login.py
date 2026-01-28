@@ -1,43 +1,63 @@
-from SmartApi import SmartConnect
-import pyotp
-import os
-from dotenv import load_dotenv
+# coreapi/services/angel_login.py
 
+import os
+import pyotp
+from dotenv import load_dotenv
+from SmartApi import SmartConnect
+
+# Load environment variables
 load_dotenv()
 
-API_KEY = os.getenv("ANGEL_API_KEY")
-CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
-MPIN = os.getenv("ANGEL_MPIN")
-TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
+# -----------------------------
+# SINGLETON SMARTAPI SESSION
+# -----------------------------
+_smartapi_client = None
 
-_smart = None   # singleton
 
-def get_smart_connection():
-    global _smart
+def _create_smartapi_session():
+    """
+    Internal function to create Angel One SmartAPI session
+    """
+    api_key = os.getenv("ANGEL_API_KEY")
+    client_id = os.getenv("ANGEL_CLIENT_ID")
+    mpin = os.getenv("ANGEL_MPIN")
+    totp_secret = os.getenv("ANGEL_TOTP_SECRET")
 
-    if _smart:
-        return _smart
+    if not all([api_key, client_id, mpin, totp_secret]):
+        raise Exception("Angel One credentials missing in .env")
 
-    smart = SmartConnect(api_key=API_KEY)
+    smart_api = SmartConnect(api_key)
 
-    totp = pyotp.TOTP(TOTP_SECRET).now()
-    data = smart.generateSession(CLIENT_ID, MPIN, totp)
+    totp = pyotp.TOTP(totp_secret).now()
 
-    if not data or not data.get("data"):
-        raise Exception(f"Angel login failed: {data}")
+    session = smart_api.generateSession(
+        client_id,
+        mpin,
+        totp
+    )
 
-    jwt = data["data"]["jwtToken"]
+    if session.get("status") is False:
+        raise Exception("Angel One login failed")
 
-    # 🔥 CRITICAL FIX
-    if jwt.startswith("Bearer "):
-        jwt = jwt.replace("Bearer ", "")
+    return smart_api
 
-    smart.setAccessToken(jwt)
 
-    _smart = smart
-    return smart
+# =====================================================
+# PUBLIC FUNCTIONS (KEEP ALL FOR COMPATIBILITY)
+# =====================================================
+
+def get_angel_session():
+    """
+    Used by angel_ltp.py
+    """
+    global _smartapi_client
+    if _smartapi_client is None:
+        _smartapi_client = _create_smartapi_session()
+    return _smartapi_client
+
+
 def get_smartapi_client():
     """
-    Standard wrapper used by other services
+    Used by angel_candles.py and legacy services
     """
-    return get_smart_connection()
+    return get_angel_session()

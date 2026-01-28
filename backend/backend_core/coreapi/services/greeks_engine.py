@@ -1,64 +1,55 @@
 import math
+from scipy.stats import norm
 
-# --------------------------------------------
-# Black–Scholes Greeks Calculator (Final 2026)
-# --------------------------------------------
+# RBI risk-free rate (approx)
+RISK_FREE_RATE = 0.065  # 6.5%
 
-def compute_greeks(spot, strike, iv, time_to_expiry, option_type):
+
+def calculate_greeks(S, K, T, sigma, option_type="CE"):
     """
-    spot: underlying price
-    strike: strike price
-    iv: implied volatility (0.0 — 1.0)
-    time_to_expiry: in years (eg: 5 days = 5/365)
-    option_type: "CE" or "PE"
+    Calculate Black-Scholes Greeks
+
+    S = Spot price
+    K = Strike price
+    T = Time to expiry (in years)
+    sigma = Implied volatility (decimal)
+    option_type = CE / PE
     """
 
-    if spot <= 0 or strike <= 0 or time_to_expiry <= 0 or iv <= 0:
+    if T <= 0 or sigma <= 0:
         return {
             "delta": 0,
             "gamma": 0,
             "theta": 0,
-            "vega": 0,
-            "rho": 0
+            "vega": 0
         }
 
-    r = 0.10  # risk-free rate (10%)
-    sigma = iv
+    d1 = (math.log(S / K) + (RISK_FREE_RATE + 0.5 * sigma ** 2) * T) / (
+        sigma * math.sqrt(T)
+    )
+    d2 = d1 - sigma * math.sqrt(T)
 
-    # d1 and d2 (Black-Scholes)
-    d1 = (math.log(spot / strike) + (r + sigma * sigma / 2) * time_to_expiry) / (sigma * math.sqrt(time_to_expiry))
-    d2 = d1 - sigma * math.sqrt(time_to_expiry)
-
-    # normal distribution functions
-    def N(x):
-        return 0.5 * (1 + math.erf(x / math.sqrt(2)))
-
-    def n(x):
-        return (1 / math.sqrt(2 * math.pi)) * math.exp(-0.5 * x * x)
-
-    # Greeks calculations
-    gamma = n(d1) / (spot * sigma * math.sqrt(time_to_expiry))
-    vega = spot * n(d1) * math.sqrt(time_to_expiry) / 100
+    pdf_d1 = norm.pdf(d1)
 
     if option_type == "CE":
-        delta = N(d1)
+        delta = norm.cdf(d1)
         theta = (
-            -(spot * n(d1) * sigma) / (2 * math.sqrt(time_to_expiry))
-            - r * strike * math.exp(-r * time_to_expiry) * N(d2)
+            -(S * pdf_d1 * sigma) / (2 * math.sqrt(T))
+            - RISK_FREE_RATE * K * math.exp(-RISK_FREE_RATE * T) * norm.cdf(d2)
         ) / 365
-        rho = strike * time_to_expiry * math.exp(-r * time_to_expiry) * N(d2) / 100
-    else:  # PE
-        delta = -N(-d1)
+    else:
+        delta = -norm.cdf(-d1)
         theta = (
-            -(spot * n(d1) * sigma) / (2 * math.sqrt(time_to_expiry))
-            + r * strike * math.exp(-r * time_to_expiry) * N(-d2)
+            -(S * pdf_d1 * sigma) / (2 * math.sqrt(T))
+            + RISK_FREE_RATE * K * math.exp(-RISK_FREE_RATE * T) * norm.cdf(-d2)
         ) / 365
-        rho = -strike * time_to_expiry * math.exp(-r * time_to_expiry) * N(-d2) / 100
+
+    gamma = pdf_d1 / (S * sigma * math.sqrt(T))
+    vega = (S * pdf_d1 * math.sqrt(T)) / 100
 
     return {
-        "delta": round(delta, 5),
-        "gamma": round(gamma, 5),
-        "theta": round(theta, 5),
-        "vega": round(vega, 5),
-        "rho": round(rho, 5)
+        "delta": round(delta, 4),
+        "gamma": round(gamma, 4),
+        "theta": round(theta, 4),
+        "vega": round(vega, 4),
     }

@@ -1,22 +1,53 @@
-from coreapi.services.angel_login import get_smart_connection
+# coreapi/services/angel_ltp.py
 
-TOKEN_MAP = {
-    "NIFTY": ("NSE", "NIFTY 50", "26000"),
-    "BANKNIFTY": ("NSE", "NIFTY BANK", "26009"),
-}
+from coreapi.services.symbol_master import (
+    EQUITY_SYMBOL_MAP,
+    ETF_SYMBOL_MAP
+)
+from coreapi.services.angel_login import get_angel_session
 
-def get_ltp(symbol: str) -> float:
+
+def get_ltp(symbol: str):
+    """
+    Fetch LTP using Angel One SmartAPI
+    """
+
     symbol = symbol.upper()
+    session = get_angel_session()
 
-    if symbol not in TOKEN_MAP:
-        raise ValueError(f"Unsupported symbol: {symbol}")
+    # -------------------------------
+    # INDEX
+    # -------------------------------
+    if symbol in ["NIFTY", "BANKNIFTY"]:
+        data = session.ltpData(
+            exchange="NSE",
+            tradingsymbol=symbol,
+            symboltoken="99926000"
+        )
+        return float(data["data"]["ltp"])
 
-    exchange, tradingsymbol, token = TOKEN_MAP[symbol]
+    # -------------------------------
+    # EQUITY
+    # -------------------------------
+    if symbol in EQUITY_SYMBOL_MAP:
+        info = EQUITY_SYMBOL_MAP[symbol]
+        data = session.ltpData(
+            exchange=info["exchange"],
+            tradingsymbol=symbol,
+            symboltoken=info["token"]
+        )
+        return float(data["data"]["ltp"])
 
-    smart = get_smart_connection()
-    response = smart.ltpData(exchange, tradingsymbol, token)
+    # -------------------------------
+    # ETF
+    # -------------------------------
+    if symbol in ETF_SYMBOL_MAP:
+        info = ETF_SYMBOL_MAP[symbol]
+        data = session.ltpData(
+            exchange=info["exchange"],
+            tradingsymbol=symbol,
+            symboltoken=info["token"]
+        )
+        return float(data["data"]["ltp"])
 
-    if not response or not response.get("data"):
-        raise Exception(f"LTP fetch failed: {response}")
-
-    return float(response["data"]["ltp"])
+    raise Exception(f"LTP not available for symbol: {symbol}")

@@ -1,144 +1,164 @@
+# coreapi/services/investment_planner_engine.py
+
+from coreapi.services.angel_ltp import get_ltp
+
+
 def investment_planner_engine(capital, risk_profile, market_trend):
     """
-    Investment Planner with:
-    - Stock & ETF suggestions
-    - Expected annual returns
-    - Human-readable reasoning
+    SMART RISK – CAPITAL AWARE INVESTMENT PLANNER
+    - No fake diversification
+    - Capital decides everything
+    - Clear priority & explanation
     """
 
-    risk_profile = risk_profile.lower()
-    market_trend = market_trend.capitalize()
+    plan = {
+        "capital": capital,
+        "investor_category": "",
+        "diversification_status": "",
+        "traffic_light": "",
+        "investment_priority": [],
+        "affordable_assets": [],
+        "blocked_assets": [],
+        "education": "",
+        "next_step": ""
+    }
 
-    # ----------------------------
-    # BASE ALLOCATION
-    # ----------------------------
-    if risk_profile == "low":
-        plan = {
-            "Index ETF": {
-                "percent": 0.50,
-                "return": 10,
-                "assets": ["NIFTY 50 ETF"],
-                "reason": "Provides diversification across top Indian companies with low risk."
-            },
-            "Large Cap Stocks": {
-                "percent": 0.30,
-                "return": 11,
-                "assets": ["Reliance", "TCS", "HDFC Bank"],
-                "reason": "Stable market leaders with strong fundamentals and steady growth."
-            },
-            "Gold ETF": {
-                "percent": 0.10,
-                "return": 7,
-                "assets": ["GoldBeES"],
-                "reason": "Acts as a hedge during market volatility and inflation."
-            },
-            "Liquid Fund": {
-                "percent": 0.10,
-                "return": 4,
-                "assets": ["Liquid ETF"],
-                "reason": "Ensures capital safety and liquidity."
-            }
+    # --------------------------------------------------
+    # 1️⃣ INVESTOR CATEGORY (CAPITAL BASED)
+    # --------------------------------------------------
+    if capital < 300000:
+        plan["investor_category"] = "BEGINNER"
+    elif capital < 1500000:
+        plan["investor_category"] = "PROFESSIONAL"
+    else:
+        plan["investor_category"] = "EXPERT"
+
+    # --------------------------------------------------
+    # 2️⃣ DIVERSIFICATION STATUS
+    # --------------------------------------------------
+    if capital < 50000:
+        plan["diversification_status"] = "NOT POSSIBLE"
+        plan["traffic_light"] = "🟢 GREEN (SAFE – CAPITAL PROTECTED)"
+    elif capital < 300000:
+        plan["diversification_status"] = "PARTIAL"
+        plan["traffic_light"] = "🟡 YELLOW (MODERATE RISK)"
+    else:
+        plan["diversification_status"] = "FULL"
+        plan["traffic_light"] = "🟢 GREEN (HEALTHY DIVERSIFICATION)"
+
+    # --------------------------------------------------
+    # 3️⃣ INVESTMENT PRIORITY (WHAT FIRST?)
+    # --------------------------------------------------
+    if capital < 50000:
+        plan["investment_priority"] = [
+            "Index Mutual Fund (SIP only)"
+        ]
+    elif capital < 300000:
+        plan["investment_priority"] = [
+            "Index Mutual Fund",
+            "Debt Mutual Fund",
+            "Gold Mutual Fund"
+        ]
+    else:
+        plan["investment_priority"] = [
+            "Index Fund / ETF (Base)",
+            "Debt (Stability)",
+            "Gold (Insurance)",
+            "Stocks (Selective)"
+        ]
+
+    # --------------------------------------------------
+    # 4️⃣ MUTUAL FUNDS (ALWAYS POSSIBLE)
+    # --------------------------------------------------
+    plan["affordable_assets"].extend([
+        {
+            "type": "Mutual Fund",
+            "name": "Index Mutual Fund",
+            "reason": "Best first investment, auto-diversified"
+        },
+        {
+            "type": "Mutual Fund",
+            "name": "Debt Mutual Fund",
+            "reason": "Stability during market crashes"
+        },
+        {
+            "type": "Mutual Fund",
+            "name": "Gold Mutual Fund",
+            "reason": "Protection during crisis, war, inflation"
         }
+    ])
 
-    elif risk_profile == "medium":
-        plan = {
-            "Index ETF": {
-                "percent": 0.40,
-                "return": 10,
-                "assets": ["NIFTY 50 ETF"],
-                "reason": "Provides core stability to the portfolio."
-            },
-            "Large Cap Stocks": {
-                "percent": 0.30,
-                "return": 11,
-                "assets": ["Reliance", "TCS"],
-                "reason": "Balances growth and safety."
-            },
-            "Mid Cap Stocks": {
-                "percent": 0.20,
-                "return": 13,
-                "assets": ["Trent", "L&T Technology Services"],
-                "reason": "Offers higher growth potential with manageable risk."
-            },
-            "Gold ETF": {
-                "percent": 0.10,
-                "return": 7,
-                "assets": ["GoldBeES"],
-                "reason": "Protects portfolio during downturns."
-            }
-        }
+    # --------------------------------------------------
+    # 5️⃣ STOCK & ETF CHECK (PRICE AWARE)
+    # --------------------------------------------------
+    stock_universe = ["RELIANCE", "TCS", "INFY", "ITC", "HDFCBANK", "MRF"]
+    etf_universe = ["NIFTYBEES", "BANKBEES", "GOLDBEES"]
 
-    else:  # high risk
-        plan = {
-            "Index ETF": {
-                "percent": 0.30,
-                "return": 10,
-                "assets": ["NIFTY 50 ETF"],
-                "reason": "Maintains minimum portfolio stability."
-            },
-            "Mid Cap Stocks": {
-                "percent": 0.40,
-                "return": 13,
-                "assets": ["Trent", "L&T Technology Services"],
-                "reason": "Strong growth-oriented companies."
-            },
-            "Small Cap Stocks": {
-                "percent": 0.20,
-                "return": 15,
-                "assets": ["Affle India", "Deepak Nitrite"],
-                "reason": "High growth potential with higher volatility."
-            },
-            "Gold ETF": {
-                "percent": 0.10,
-                "return": 7,
-                "assets": ["GoldBeES"],
-                "reason": "Risk hedge against equity drawdowns."
-            }
-        }
+    for stock in stock_universe:
+        try:
+            price = get_ltp(stock)
+        except Exception:
+            plan["blocked_assets"].append({
+                "type": "Stock",
+                "name": stock,
+                "reason": "Live price not available"
+            })
+            continue
 
-    # ----------------------------
-    # BEAR MARKET SAFETY RULE
-    # ----------------------------
-    if market_trend == "Bearish":
-        plan["Liquid Fund"] = {
-            "percent": 0.10,
-            "return": 4,
-            "assets": ["Liquid ETF"],
-            "reason": "Added for capital protection during bearish markets."
-        }
-        plan["Index ETF"]["percent"] -= 0.10
+        if price <= capital:
+            plan["affordable_assets"].append({
+                "type": "Stock",
+                "name": stock,
+                "price": price,
+                "reason": "Affordable with your capital"
+            })
+        else:
+            plan["blocked_assets"].append({
+                "type": "Stock",
+                "name": stock,
+                "price": price,
+                "reason": "Stock price higher than your capital"
+            })
 
-    # ----------------------------
-    # FINAL CALCULATION
-    # ----------------------------
-    allocation = {}
-    weighted_return = 0
+    for etf in etf_universe:
+        try:
+            price = get_ltp(etf)
+        except Exception:
+            plan["blocked_assets"].append({
+                "type": "ETF",
+                "name": etf,
+                "reason": "Live price not available"
+            })
+            continue
 
-    for category, data in plan.items():
-        amount = round(capital * data["percent"], 2)
-        allocation[category] = {
-            "amount": amount,
-            "expected_return_percent": data["return"],
-            "assets": data["assets"],
-            "reason": data["reason"]
-        }
-        weighted_return += data["percent"] * data["return"]
+        if price <= capital:
+            plan["affordable_assets"].append({
+                "type": "ETF",
+                "name": etf,
+                "price": price,
+                "reason": "ETF unit affordable"
+            })
+        else:
+            plan["blocked_assets"].append({
+                "type": "ETF",
+                "name": etf,
+                "price": price,
+                "reason": "ETF unit price exceeds capital"
+            })
 
-    # ----------------------------
-    # OVERALL EXPLANATION
-    # ----------------------------
-    overall_reason = (
-        f"This allocation is designed for a {risk_profile.capitalize()} risk investor. "
-        f"It balances growth and safety based on current {market_trend} market conditions. "
-        "Index ETFs provide diversification, selected stocks offer stable growth, "
-        "and defensive assets reduce downside risk."
+    # --------------------------------------------------
+    # 6️⃣ EDUCATION & NEXT STEP
+    # --------------------------------------------------
+    plan["education"] = (
+        "SmartRisk shows only investments that are actually possible with your money. "
+        "Diversification is allowed only when capital supports it."
     )
 
-    return {
-        "capital": capital,
-        "risk_profile": risk_profile.capitalize(),
-        "market_trend": market_trend,
-        "expected_portfolio_return_percent": round(weighted_return, 2),
-        "why_this_plan_works": overall_reason,
-        "allocation": allocation
-    }
+    if capital < 50000:
+        plan["next_step"] = "Grow capital first. Do not force diversification."
+    elif capital < 300000:
+        plan["next_step"] = "You can diversify slowly using funds. Avoid direct stocks."
+    else:
+        plan["next_step"] = "You are ready for full diversification with discipline."
+
+    return plan
