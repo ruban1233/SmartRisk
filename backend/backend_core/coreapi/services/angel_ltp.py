@@ -1,23 +1,12 @@
-# coreapi/services/angel_ltp.py
-
-from coreapi.services.symbol_master import (
-    EQUITY_SYMBOL_MAP,
-    ETF_SYMBOL_MAP
-)
 from coreapi.services.angel_login import get_angel_session
+from coreapi.services.symbol_loader import find_symbol
 
 
-def get_ltp(symbol: str):
-    """
-    Fetch LTP using Angel One SmartAPI
-    """
-
-    symbol = symbol.upper()
+def get_ltp(symbol: str) -> float:
     session = get_angel_session()
+    symbol = symbol.upper()
 
-    # -------------------------------
-    # INDEX
-    # -------------------------------
+    # Special case: Index
     if symbol in ["NIFTY", "BANKNIFTY"]:
         data = session.ltpData(
             exchange="NSE",
@@ -26,28 +15,19 @@ def get_ltp(symbol: str):
         )
         return float(data["data"]["ltp"])
 
-    # -------------------------------
-    # EQUITY
-    # -------------------------------
-    if symbol in EQUITY_SYMBOL_MAP:
-        info = EQUITY_SYMBOL_MAP[symbol]
-        data = session.ltpData(
-            exchange=info["exchange"],
-            tradingsymbol=symbol,
-            symboltoken=info["token"]
-        )
-        return float(data["data"]["ltp"])
+    # Equity / ETF / Stock (dynamic lookup)
+    info = find_symbol(symbol)
 
-    # -------------------------------
-    # ETF
-    # -------------------------------
-    if symbol in ETF_SYMBOL_MAP:
-        info = ETF_SYMBOL_MAP[symbol]
-        data = session.ltpData(
-            exchange=info["exchange"],
-            tradingsymbol=symbol,
-            symboltoken=info["token"]
-        )
-        return float(data["data"]["ltp"])
+    if not info:
+        raise Exception(f"Symbol not found in Angel master: {symbol}")
 
-    raise Exception(f"LTP not available for symbol: {symbol}")
+    data = session.ltpData(
+        exchange=info["exchange"],
+        tradingsymbol=info["tradingsymbol"],
+        symboltoken=info["token"],
+    )
+
+    if not data or not data.get("data"):
+        raise Exception(f"LTP fetch failed for {symbol}")
+
+    return float(data["data"]["ltp"])

@@ -1,16 +1,7 @@
-# coreapi/services/investment_planner_engine.py
-
 from coreapi.services.angel_ltp import get_ltp
 
 
-def investment_planner_engine(capital, risk_profile, market_trend):
-    """
-    SMART RISK – CAPITAL AWARE INVESTMENT PLANNER
-    - No fake diversification
-    - Capital decides everything
-    - Clear priority & explanation
-    """
-
+def investment_planner_engine(capital, risk_profile="low", market_trend="Sideways"):
     plan = {
         "capital": capital,
         "investor_category": "",
@@ -20,12 +11,10 @@ def investment_planner_engine(capital, risk_profile, market_trend):
         "affordable_assets": [],
         "blocked_assets": [],
         "education": "",
-        "next_step": ""
+        "next_step": "",
     }
 
-    # --------------------------------------------------
-    # 1️⃣ INVESTOR CATEGORY (CAPITAL BASED)
-    # --------------------------------------------------
+    # 1️⃣ Investor category
     if capital < 300000:
         plan["investor_category"] = "BEGINNER"
     elif capital < 1500000:
@@ -33,132 +22,70 @@ def investment_planner_engine(capital, risk_profile, market_trend):
     else:
         plan["investor_category"] = "EXPERT"
 
-    # --------------------------------------------------
-    # 2️⃣ DIVERSIFICATION STATUS
-    # --------------------------------------------------
+    # 2️⃣ Risk & diversification
     if capital < 50000:
         plan["diversification_status"] = "NOT POSSIBLE"
-        plan["traffic_light"] = "🟢 GREEN (SAFE – CAPITAL PROTECTED)"
+        plan["traffic_light"] = "🟢 GREEN (SAFE)"
     elif capital < 300000:
         plan["diversification_status"] = "PARTIAL"
-        plan["traffic_light"] = "🟡 YELLOW (MODERATE RISK)"
+        plan["traffic_light"] = "🟡 YELLOW (MODERATE)"
     else:
         plan["diversification_status"] = "FULL"
-        plan["traffic_light"] = "🟢 GREEN (HEALTHY DIVERSIFICATION)"
+        plan["traffic_light"] = "🟢 GREEN (HEALTHY)"
 
-    # --------------------------------------------------
-    # 3️⃣ INVESTMENT PRIORITY (WHAT FIRST?)
-    # --------------------------------------------------
-    if capital < 50000:
-        plan["investment_priority"] = [
-            "Index Mutual Fund (SIP only)"
-        ]
-    elif capital < 300000:
-        plan["investment_priority"] = [
-            "Index Mutual Fund",
-            "Debt Mutual Fund",
-            "Gold Mutual Fund"
-        ]
-    else:
-        plan["investment_priority"] = [
-            "Index Fund / ETF (Base)",
-            "Debt (Stability)",
-            "Gold (Insurance)",
-            "Stocks (Selective)"
-        ]
+    # 3️⃣ Priority
+    plan["investment_priority"] = [
+        "Index Mutual Fund",
+        "Debt Mutual Fund",
+        "Gold Mutual Fund",
+        "ETF / Stocks (when affordable)",
+    ]
 
-    # --------------------------------------------------
-    # 4️⃣ MUTUAL FUNDS (ALWAYS POSSIBLE)
-    # --------------------------------------------------
+    # 4️⃣ Always-possible assets
     plan["affordable_assets"].extend([
-        {
-            "type": "Mutual Fund",
-            "name": "Index Mutual Fund",
-            "reason": "Best first investment, auto-diversified"
-        },
-        {
-            "type": "Mutual Fund",
-            "name": "Debt Mutual Fund",
-            "reason": "Stability during market crashes"
-        },
-        {
-            "type": "Mutual Fund",
-            "name": "Gold Mutual Fund",
-            "reason": "Protection during crisis, war, inflation"
-        }
+        {"type": "Mutual Fund", "name": "Index Mutual Fund", "reason": "Auto diversified"},
+        {"type": "Mutual Fund", "name": "Debt Mutual Fund", "reason": "Capital protection"},
+        {"type": "Mutual Fund", "name": "Gold Mutual Fund", "reason": "Crisis hedge"},
     ])
 
-    # --------------------------------------------------
-    # 5️⃣ STOCK & ETF CHECK (PRICE AWARE)
-    # --------------------------------------------------
-    stock_universe = ["RELIANCE", "TCS", "INFY", "ITC", "HDFCBANK", "MRF"]
-    etf_universe = ["NIFTYBEES", "BANKBEES", "GOLDBEES"]
+    # 5️⃣ ETF & stock price-aware check
+    symbols = ["NIFTYBEES", "BANKBEES", "GOLDBEES", "RELIANCE", "TCS", "INFY", "MRF"]
 
-    for stock in stock_universe:
+    for sym in symbols:
         try:
-            price = get_ltp(stock)
-        except Exception:
+            price = get_ltp(sym)
+        except Exception as e:
             plan["blocked_assets"].append({
-                "type": "Stock",
-                "name": stock,
-                "reason": "Live price not available"
+                "type": "Asset",
+                "name": sym,
+                "reason": str(e),
             })
             continue
 
         if price <= capital:
             plan["affordable_assets"].append({
-                "type": "Stock",
-                "name": stock,
-                "price": price,
-                "reason": "Affordable with your capital"
+                "type": "ETF/Stock",
+                "name": sym,
+                "price": round(price, 2),
+                "reason": "Affordable with your capital",
             })
         else:
             plan["blocked_assets"].append({
-                "type": "Stock",
-                "name": stock,
-                "price": price,
-                "reason": "Stock price higher than your capital"
+                "type": "ETF/Stock",
+                "name": sym,
+                "price": round(price, 2),
+                "reason": "Price higher than capital",
             })
 
-    for etf in etf_universe:
-        try:
-            price = get_ltp(etf)
-        except Exception:
-            plan["blocked_assets"].append({
-                "type": "ETF",
-                "name": etf,
-                "reason": "Live price not available"
-            })
-            continue
-
-        if price <= capital:
-            plan["affordable_assets"].append({
-                "type": "ETF",
-                "name": etf,
-                "price": price,
-                "reason": "ETF unit affordable"
-            })
-        else:
-            plan["blocked_assets"].append({
-                "type": "ETF",
-                "name": etf,
-                "price": price,
-                "reason": "ETF unit price exceeds capital"
-            })
-
-    # --------------------------------------------------
-    # 6️⃣ EDUCATION & NEXT STEP
-    # --------------------------------------------------
+    # 6️⃣ Education
     plan["education"] = (
-        "SmartRisk shows only investments that are actually possible with your money. "
-        "Diversification is allowed only when capital supports it."
+        "All prices are fetched from Angel One last traded price. "
+        "SmartRisk never shows investments that cannot be executed."
     )
 
-    if capital < 50000:
-        plan["next_step"] = "Grow capital first. Do not force diversification."
-    elif capital < 300000:
-        plan["next_step"] = "You can diversify slowly using funds. Avoid direct stocks."
-    else:
-        plan["next_step"] = "You are ready for full diversification with discipline."
+    plan["next_step"] = (
+        "Grow capital first" if capital < 50000 else
+        "Diversify slowly with discipline"
+    )
 
     return plan
