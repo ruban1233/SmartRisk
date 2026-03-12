@@ -1,20 +1,21 @@
-# Environment variables
-.env
-
-# Python cache
+# Python
+venv/
 __pycache__/
 *.pyc
 
-# Virtual environment
-venv/
-../venv/
-
 # Django
+.env
 db.sqlite3
-logs/
+*.log
 
-# OS files
+# Node
+node_modules/
+npm-debug.log
+
+# OS
 .DS_Store
 Thumbs.db
-test_angel_login.pyc
-test_ltp_terminal.pyc
+
+# IDE
+.vscode/
+.idea/
