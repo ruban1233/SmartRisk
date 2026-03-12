@@ -1,18 +1,9 @@
 import math
 
-def get_atm_strike(ltp: float, symbol: str) -> int:
-    """
-    Calculate ATM strike price based on LTP.
-    """
+def get_atm_strike(ltp, symbol):
+    if ltp is None:
+        return None
 
-    symbol = symbol.upper()
-
-    if symbol == "NIFTY":
-        strike_gap = 50
-    elif symbol == "BANKNIFTY":
-        strike_gap = 100
-    else:
-        raise ValueError("Unsupported symbol")
-
+    strike_gap = 50 if symbol == "NIFTY" else 100
     atm = math.ceil(ltp / strike_gap) * strike_gap
-    return int(atm)
+    return atm

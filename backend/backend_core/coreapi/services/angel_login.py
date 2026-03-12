@@ -1,44 +1,30 @@
-from SmartApi import SmartConnect
 import pyotp
-import os
-from dotenv import load_dotenv
+from SmartApi import SmartConnect
+from django.conf import settings
 
-load_dotenv()
-
-API_KEY = os.getenv("ANGEL_API_KEY")
-CLIENT_ID = os.getenv("ANGEL_CLIENT_ID")
-MPIN = os.getenv("ANGEL_MPIN")
-TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET")
-
-_smartapi = None  # singleton session
+smart_session = None
 
 
-def get_angel_session():
-    global _smartapi
+def get_smart_connection():
+    global smart_session
 
-    if _smartapi is not None:
-        return _smartapi
+    if smart_session is not None:
+        return smart_session
 
-    smart = SmartConnect(api_key=API_KEY)
+    api_key = settings.ANGEL_API_KEY
+    client_id = settings.ANGEL_CLIENT_ID
+    mpin = settings.ANGEL_MPIN
+    totp_secret = settings.ANGEL_TOTP_SECRET
 
-    totp = pyotp.TOTP(TOTP_SECRET).now()
-    data = smart.generateSession(CLIENT_ID, MPIN, totp)
+    totp = pyotp.TOTP(totp_secret).now()
 
-    if not data or not data.get("data"):
-        raise Exception(f"Angel login failed: {data}")
+    smart = SmartConnect(api_key)
 
-    jwt = data["data"]["jwtToken"]
-    if jwt.startswith("Bearer "):
-        jwt = jwt.replace("Bearer ", "")
+    response = smart.generateSession(client_id, mpin, totp)
 
-    smart.setAccessToken(jwt)
+    if not response["status"]:
+        raise Exception("Angel login failed")
 
-    _smartapi = smart
-    return _smartapi
+    smart_session = smart
 
-
-# ----------------------------------
-# BACKWARD COMPATIBILITY
-# ----------------------------------
-def get_smartapi_client():
-    return get_angel_session()
+    return smart_session

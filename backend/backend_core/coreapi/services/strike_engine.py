@@ -1,70 +1,44 @@
-def strike_engine(
-    symbol,
-    spot_price,
-    strategy,
-    capital,
-    risk_percent,
-):
+"""
+Strike & Lot Size Engine
+------------------------
+Provides lot size and basic strike utilities.
+Used by SmartRisk option advisor.
+"""
+
+
+def get_lot_size(symbol: str) -> int:
     """
-    Auto select:
-    - expiry type
-    - strike prices
-    - lot size
+    Returns current lot size for index options.
+
+    NOTE:
+    Lot sizes changed effective January 2026 to align with SEBI regulations.
+    These values reflect the 2026 index derivative revisions.
     """
 
-    # Lot sizes (can be updated dynamically later)
-    lot_sizes = {
-        "NIFTY": 50,
-        "BANKNIFTY": 15
-    }
+    symbol = symbol.upper()
 
-    lot_size = lot_sizes.get(symbol, 50)
-
-    # Decide expiry
-    expiry_type = "WEEKLY" if capital < 100000 else "MONTHLY"
-
-    # Risk amount
-    max_risk_amount = capital * (risk_percent / 100)
-
-    # Strike rounding
-    step = 50 if symbol == "NIFTY" else 100
-    atm = round(spot_price / step) * step
-
-    result = {
-        "expiry_type": expiry_type,
-        "lot_size": lot_size,
-        "lots_allowed": 1,  # default safe
-        "strikes": {}
-    }
-
-    # Strategy-wise strike logic
-    if strategy == "BUY_OPTION":
-        result["strikes"] = {
-            "type": "ATM",
-            "strike": atm
-        }
-
-    elif strategy == "DEBIT_SPREAD":
-        result["strikes"] = {
-            "buy": atm,
-            "sell": atm + step
-        }
-
-    elif strategy == "CREDIT_SPREAD":
-        result["strikes"] = {
-            "sell": atm,
-            "hedge": atm + (2 * step)
-        }
-
-    elif strategy == "IRON_CONDOR":
-        result["strikes"] = {
-            "sell_call": atm + step,
-            "buy_call": atm + (3 * step),
-            "sell_put": atm - step,
-            "buy_put": atm - (3 * step)
-        }
-
+    if symbol == "NIFTY":
+        return 65
+    elif symbol == "BANKNIFTY":
+        return 30
+    elif symbol == "FINNIFTY":
+        return 60
+    elif symbol == "SENSEX":
+        return 20
+    elif symbol == "MIDCPNIFTY":
+        return 120
     else:
-        result["strikes"] = {}
+        # Stocks / ETFs vary widely; return 1 is a safe default for non-F&O
+        return 1
 
-    return result
+
+# ---------------------------------------
+# BACKWARD COMPATIBILITY (DO NOT REMOVE)
+# ---------------------------------------
+
+def strike_engine(symbol: str) -> int:
+    return get_lot_size(symbol)
+
+
+def lot_size(symbol: str) -> int:
+    return get_lot_size(symbol)

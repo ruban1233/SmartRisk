@@ -13,10 +13,8 @@ urlpatterns = [
     # =======================
     # MARKET DATA
     # =======================
-    path("prices/", views.prices),                 # placeholder (safe)
     path("test-ltp/", views.test_ltp_view),
     path("atm-strike/", views.atm_strike_view),
-    path("option-chain/<str:symbol>/", views.option_chain),
 
     # =======================
     # ANALYSIS & CORE ENGINES
@@ -29,11 +27,4 @@ urlpatterns = [
     # OPTION DOCTOR
     # =======================
     path("option-doctor/", views.option_doctor_view),
-
-    # =======================
-    # UTILITIES / DASHBOARD
-    # =======================
-    path("dashboard/", views.dashboard),
-    path("strategy/", views.strategy),
-    path("pl/", views.pl_calculator),
 ]

@@ -1,39 +1,37 @@
-def capital_risk_engine(capital, risk_color):
+"""
+Capital Risk Engine
+-------------------
+Defines how much capital can be risked per trade.
+Used by SmartRisk strategy & option advisor engines.
+"""
+
+
+def get_allowed_loss(capital: int) -> float:
     """
-    capital: int or float (user capital)
-    risk_color: GREEN / YELLOW / RED
+    Returns maximum allowed loss for a single trade
+    based on capital size.
+
+    This is RISK MANAGEMENT, not prediction.
     """
 
-    if capital <= 0:
-        raise ValueError("Capital must be greater than zero")
-
-    risk_color = risk_color.upper()
-
-    if risk_color == "GREEN":
-        risk_percent = 5
-        max_trades = 2
-        rule = "Small lots only. Beginner safe."
-
-    elif risk_color == "YELLOW":
-        risk_percent = 10
-        max_trades = 3
-        rule = "Spreads allowed. Experience required."
-
-    elif risk_color == "RED":
-        risk_percent = 20
-        max_trades = 5
-        rule = "High risk. Expert traders only."
-
+    # Beginner safety rules
+    if capital < 50000:
+        return round(capital * 0.05, 2)   # 5% risk
+    elif capital < 300000:
+        return round(capital * 0.04, 2)   # 4% risk
+    elif capital < 1500000:
+        return round(capital * 0.03, 2)   # 3% risk
     else:
-        raise ValueError("Invalid risk color")
+        return round(capital * 0.02, 2)   # 2% risk
 
-    max_risk_amount = round(capital * risk_percent / 100, 2)
 
-    return {
-        "capital": capital,
-        "risk_color": risk_color,
-        "risk_percent": risk_percent,
-        "max_risk_amount": max_risk_amount,
-        "max_trades_per_day": max_trades,
-        "position_size_rule": rule
-    }
+# ---------------------------------------
+# BACKWARD COMPATIBILITY (DO NOT REMOVE)
+# ---------------------------------------
+
+def capital_risk_engine(capital: int) -> float:
+    return get_allowed_loss(capital)
+
+
+def allowed_loss(capital: int) -> float:
+    return get_allowed_loss(capital)

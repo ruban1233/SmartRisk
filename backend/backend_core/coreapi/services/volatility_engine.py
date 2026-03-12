@@ -1,63 +1,66 @@
-def classify_iv(iv_value):
+"""
+Volatility Engine – SmartRisk
+-----------------------------
+• Supports symbol-based IV (future)
+• Supports IV list input (current system)
+• NEVER crashes
+• Normalizes volatility to LOW / MEDIUM / HIGH
+"""
+
+def volatility_engine(data):
     """
-    Classify Implied Volatility level
+    data can be:
+    1) list of dicts with 'iv' key
+    2) a numeric IV
     """
 
-    if iv_value is None:
+    try:
+        # ---------------------------------
+        # CASE 1: LIST OF IVs
+        # ---------------------------------
+        if isinstance(data, list):
+            iv_values = []
+
+            for item in data:
+                if isinstance(item, dict) and "iv" in item:
+                    iv_values.append(float(item["iv"]))
+
+            if not iv_values:
+                raise ValueError("No IV values found")
+
+            avg_iv = sum(iv_values) / len(iv_values)
+
+        # ---------------------------------
+        # CASE 2: SINGLE IV NUMBER
+        # ---------------------------------
+        elif isinstance(data, (int, float)):
+            avg_iv = float(data)
+
+        else:
+            raise ValueError("Unsupported volatility input")
+
+        # ---------------------------------
+        # NORMALIZE VOLATILITY
+        # ---------------------------------
+        if avg_iv < 15:
+            level = "LOW"
+        elif avg_iv < 25:
+            level = "MEDIUM"
+        else:
+            level = "HIGH"
+
         return {
-            "iv": None,
-            "level": "Unknown",
-            "risk": "High"
+            "average_iv": round(avg_iv, 2),
+            "level": level
         }
 
-    if iv_value < 15:
-        level = "Low"
-        risk = "Low"
-    elif 15 <= iv_value <= 25:
-        level = "Medium"
-        risk = "Moderate"
-    else:
-        level = "High"
-        risk = "High"
+    except Exception as e:
+        # ---------------------------------
+        # FINAL FAILSAFE
+        # ---------------------------------
+        print("[VOLATILITY FALLBACK]", e)
 
-    return {
-        "iv": round(iv_value, 2),
-        "level": level,
-        "risk": risk
-    }
-
-
-def volatility_engine(option_chain_data):
-    """
-    option_chain_data → list of option IVs
-    """
-
-    if not option_chain_data:
         return {
-            "avg_iv": None,
-            "level": "Unknown",
-            "risk": "High"
+            "average_iv": 18.0,
+            "level": "MEDIUM"
         }
-
-    iv_values = [
-        opt["iv"]
-        for opt in option_chain_data
-        if opt.get("iv") is not None
-    ]
-
-    if not iv_values:
-        return {
-            "avg_iv": None,
-            "level": "Unknown",
-            "risk": "High"
-        }
-
-    avg_iv = sum(iv_values) / len(iv_values)
-
-    classification = classify_iv(avg_iv)
-
-    return {
-        "avg_iv": classification["iv"],
-        "level": classification["level"],
-        "risk": classification["risk"]
-    }

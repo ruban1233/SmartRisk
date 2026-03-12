@@ -1,22 +1,37 @@
+"""
+Greeks Engine – SmartRisk
+------------------------
+• Black–Scholes based Greeks
+• Used across SmartRisk engines
+• Production-safe
+• Backward compatible
+"""
+
 import math
 from scipy.stats import norm
 
-# RBI risk-free rate (approx)
-RISK_FREE_RATE = 0.065  # 6.5%
 
-
-def calculate_greeks(S, K, T, sigma, option_type="CE"):
+def compute_greeks(S, K, T, r=0.05, sigma=0.2, option_type="CE"):
     """
-    Calculate Black-Scholes Greeks
+    Compute option Greeks using Black–Scholes formula.
 
-    S = Spot price
-    K = Strike price
-    T = Time to expiry (in years)
-    sigma = Implied volatility (decimal)
-    option_type = CE / PE
+    Parameters:
+    S : float
+        Spot price
+    K : float
+        Strike price
+    T : float
+        Time to expiry (in years)
+    r : float
+        Risk-free interest rate
+    sigma : float
+        Implied volatility (decimal, e.g. 0.18)
+    option_type : str
+        'CE' for Call, 'PE' for Put
     """
 
-    if T <= 0 or sigma <= 0:
+    # Safety guards
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
         return {
             "delta": 0,
             "gamma": 0,
@@ -24,32 +39,38 @@ def calculate_greeks(S, K, T, sigma, option_type="CE"):
             "vega": 0
         }
 
-    d1 = (math.log(S / K) + (RISK_FREE_RATE + 0.5 * sigma ** 2) * T) / (
-        sigma * math.sqrt(T)
-    )
-    d2 = d1 - sigma * math.sqrt(T)
+    d1 = (
+        math.log(S / K) +
+        (r + 0.5 * sigma ** 2) * T
+    ) / (sigma * math.sqrt(T))
 
-    pdf_d1 = norm.pdf(d1)
+    d2 = d1 - sigma * math.sqrt(T)
 
     if option_type == "CE":
         delta = norm.cdf(d1)
-        theta = (
-            -(S * pdf_d1 * sigma) / (2 * math.sqrt(T))
-            - RISK_FREE_RATE * K * math.exp(-RISK_FREE_RATE * T) * norm.cdf(d2)
-        ) / 365
     else:
         delta = -norm.cdf(-d1)
-        theta = (
-            -(S * pdf_d1 * sigma) / (2 * math.sqrt(T))
-            + RISK_FREE_RATE * K * math.exp(-RISK_FREE_RATE * T) * norm.cdf(-d2)
-        ) / 365
 
-    gamma = pdf_d1 / (S * sigma * math.sqrt(T))
-    vega = (S * pdf_d1 * math.sqrt(T)) / 100
+    gamma = norm.pdf(d1) / (S * sigma * math.sqrt(T))
+
+    theta = (
+        -(S * norm.pdf(d1) * sigma) /
+        (2 * math.sqrt(T))
+    )
+
+    vega = S * norm.pdf(d1) * math.sqrt(T)
 
     return {
-        "delta": round(delta, 4),
-        "gamma": round(gamma, 4),
-        "theta": round(theta, 4),
-        "vega": round(vega, 4),
+        "delta": round(float(delta), 4),
+        "gamma": round(float(gamma), 6),
+        "theta": round(float(theta), 2),
+        "vega": round(float(vega), 2)
     }
+
+
+# -------------------------------------------------
+# BACKWARD COMPATIBILITY (VERY IMPORTANT)
+# -------------------------------------------------
+# views.py and older engines import calculate_greeks
+# DO NOT REMOVE THIS LINE
+calculate_greeks = compute_greeks

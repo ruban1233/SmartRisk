@@ -1,83 +1,93 @@
-from SmartApi import SmartConnect
-import pyotp
-import traceback
-from .greeks_engine import compute_greeks  # your custom Greeks calculator
+import requests
+import json
+import os
+from datetime import datetime
 
-# -----------------------------
-# ANGEL ONE CREDENTIALS
-# -----------------------------
-CLIENT_ID = "YOUR_CLIENT_ID"
-PASSWORD = "YOUR_PASSWORD"
-TOTP_SECRET = "YOUR_TOTP_SECRET"
-API_KEY = "YOUR_API_KEY"
+BASE_DIR = os.path.dirname(__file__)
+CACHE_FILE = os.path.join(BASE_DIR, "last_option_chain.json")
+
+NSE_URL = "https://www.nseindia.com/api/option-chain-indices?symbol={}"
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
-# -----------------------------
-# Create SmartAPI session
-# -----------------------------
-def smartapi_session():
+def save_cache(data):
+    with open(CACHE_FILE, "w") as f:
+        json.dump({
+            "timestamp": datetime.now().isoformat(),
+            "data": data
+        }, f)
+
+
+def load_cache():
+    if not os.path.exists(CACHE_FILE):
+        return None
+    with open(CACHE_FILE, "r") as f:
+        return json.load(f)
+
+
+def get_option_chain(symbol: str):
+    symbol = symbol.upper()
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
     try:
-        totp = pyotp.TOTP(TOTP_SECRET).now()
-        obj = SmartConnect(api_key=API_KEY)
-        data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+        session.get("https://www.nseindia.com", timeout=5)
+        response = session.get(NSE_URL.format(symbol), timeout=8)
 
-        if "data" not in data:
-            return None, data
+        if response.status_code != 200:
+            raise Exception("NSE blocked")
 
-        return obj, None
+        json_data = response.json()
+        records = json_data["records"]
+        underlying = records["underlyingValue"]
 
-    except Exception as e:
-        return None, str(e)
+        options = []
 
+        for item in records["data"]:
+            strike = item["strikePrice"]
+            expiry = item["expiryDate"]
 
-# ------------------------------------------------------
-# OPTION CHAIN (SMARTAPI ONLY, NOT NSE)
-# ------------------------------------------------------
-def get_option_chain(symbol):
-    try:
-        obj, err = smartapi_session()
-        if obj is None:
-            return {"status": "error", "detail": err}
+            if "CE" in item:
+                ce = item["CE"]
+                options.append({
+                    "strike": strike,
+                    "type": "CE",
+                    "ltp": ce["lastPrice"],
+                    "iv": ce["impliedVolatility"] / 100,
+                    "expiry": expiry,
+                    "underlying_price": underlying,
+                    "source": "LIVE"
+                })
 
-        chain = obj.getOptionChain(symbol)
+            if "PE" in item:
+                pe = item["PE"]
+                options.append({
+                    "strike": strike,
+                    "type": "PE",
+                    "ltp": pe["lastPrice"],
+                    "iv": pe["impliedVolatility"] / 100,
+                    "expiry": expiry,
+                    "underlying_price": underlying,
+                    "source": "LIVE"
+                })
 
-        ce_data = []
-        pe_data = []
+        if options:
+            save_cache(options)
+            return options
 
-        for item in chain['data']:
-            if item["option_type"] == "CE":
-                ce_data.append(item)
-            elif item["option_type"] == "PE":
-                pe_data.append(item)
+    except Exception:
+        pass
 
-        # -----------------------------
-        # Compute Greeks for each strike
-        # -----------------------------
-        for contract in ce_data + pe_data:
-            try:
-                greeks = compute_greeks(
-                    spot=contract["underlying_value"],
-                    strike=contract["strike_price"],
-                    iv=contract.get("implied_volatility", 0.2),  # fallback if missing
-                    time_to_expiry=contract["expiry_days"] / 365,
-                    option_type=contract["option_type"]
-                )
-                contract["greeks"] = greeks
-            except Exception as e:
-                contract["greeks"] = {"error": str(e)}
+    # 🔁 FALLBACK — LAST SESSION DATA
+    cached = load_cache()
+    if cached:
+        for opt in cached["data"]:
+            opt["source"] = "PREVIOUS_SESSION"
+        return cached["data"]
 
-        return {
-            "status": "success",
-            "symbol": symbol,
-            "spot": chain["data"][0]["underlying_value"],
-            "ce": ce_data,
-            "pe": pe_data
-        }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": "Failed to fetch option chain",
-            "detail": str(e),
-            "trace": traceback.format_exc()
-        }
+    return []

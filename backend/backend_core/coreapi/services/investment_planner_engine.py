@@ -1,91 +1,185 @@
 from coreapi.services.angel_ltp import get_ltp
+from coreapi.services.asset_allocation_engine import get_asset_allocation
+from coreapi.services.ai_summary import generate_ai_summary
 
 
-def investment_planner_engine(capital, risk_profile="low", market_trend="Sideways"):
-    plan = {
-        "capital": capital,
-        "investor_category": "",
-        "diversification_status": "",
-        "traffic_light": "",
-        "investment_priority": [],
-        "affordable_assets": [],
-        "blocked_assets": [],
-        "education": "",
-        "next_step": "",
-    }
+# -------------------------------------------------------
+# Asset Universe
+# -------------------------------------------------------
 
-    # 1️⃣ Investor category
-    if capital < 300000:
-        plan["investor_category"] = "BEGINNER"
-    elif capital < 1500000:
-        plan["investor_category"] = "PROFESSIONAL"
-    else:
-        plan["investor_category"] = "EXPERT"
+STOCKS = [
+    "RELIANCE",
+    "TCS",
+    "INFY",
+    "HDFCBANK",
+    "ICICIBANK",
+    "ITC",
+]
 
-    # 2️⃣ Risk & diversification
-    if capital < 50000:
-        plan["diversification_status"] = "NOT POSSIBLE"
-        plan["traffic_light"] = "🟢 GREEN (SAFE)"
-    elif capital < 300000:
-        plan["diversification_status"] = "PARTIAL"
-        plan["traffic_light"] = "🟡 YELLOW (MODERATE)"
-    else:
-        plan["diversification_status"] = "FULL"
-        plan["traffic_light"] = "🟢 GREEN (HEALTHY)"
+ETFS = [
+    "NIFTYBEES",
+    "BANKBEES",
+    "ITBEES",
+]
 
-    # 3️⃣ Priority
-    plan["investment_priority"] = [
-        "Index Mutual Fund",
-        "Debt Mutual Fund",
-        "Gold Mutual Fund",
-        "ETF / Stocks (when affordable)",
-    ]
+GOLD = [
+    "GOLDBEES",
+]
 
-    # 4️⃣ Always-possible assets
-    plan["affordable_assets"].extend([
-        {"type": "Mutual Fund", "name": "Index Mutual Fund", "reason": "Auto diversified"},
-        {"type": "Mutual Fund", "name": "Debt Mutual Fund", "reason": "Capital protection"},
-        {"type": "Mutual Fund", "name": "Gold Mutual Fund", "reason": "Crisis hedge"},
-    ])
 
-    # 5️⃣ ETF & stock price-aware check
-    symbols = ["NIFTYBEES", "BANKBEES", "GOLDBEES", "RELIANCE", "TCS", "INFY", "MRF"]
+# -------------------------------------------------------
+# Unit Calculation
+# -------------------------------------------------------
 
-    for sym in symbols:
+def calculate_units(allocation_amount, price):
+
+    if price is None or price <= 0:
+        return 0, 0, allocation_amount
+
+    units = int(allocation_amount // price)
+
+    invested = round(units * price, 2)
+
+    remaining = round(allocation_amount - invested, 2)
+
+    return units, invested, remaining
+
+
+# -------------------------------------------------------
+# Helper: Build Portfolio
+# -------------------------------------------------------
+
+def build_portfolio(asset_list, capital):
+
+    portfolio = []
+    blocked_assets = []
+
+    asset_count = len(asset_list)
+
+    if asset_count == 0:
+        return portfolio, blocked_assets, 0
+
+    allocation_per_asset = capital / asset_count
+
+    total_invested = 0
+
+    for symbol in asset_list:
+
         try:
-            price = get_ltp(sym)
+
+            price = get_ltp(symbol)
+
+            if price is None:
+                raise Exception("Price not available")
+
+            units, invested, remaining = calculate_units(
+                allocation_per_asset,
+                price
+            )
+
+            if units == 0:
+
+                blocked_assets.append({
+                    "asset": symbol,
+                    "reason": "Capital too low",
+                    "price": price
+                })
+
+                continue
+
+            portfolio.append({
+                "asset": symbol,
+                "price": price,
+                "allocated_amount": round(allocation_per_asset, 2),
+                "units": units,
+                "invested": invested,
+                "remaining_from_allocation": remaining
+            })
+
+            total_invested += invested
+
         except Exception as e:
-            plan["blocked_assets"].append({
-                "type": "Asset",
-                "name": sym,
-                "reason": str(e),
-            })
-            continue
 
-        if price <= capital:
-            plan["affordable_assets"].append({
-                "type": "ETF/Stock",
-                "name": sym,
-                "price": round(price, 2),
-                "reason": "Affordable with your capital",
-            })
-        else:
-            plan["blocked_assets"].append({
-                "type": "ETF/Stock",
-                "name": sym,
-                "price": round(price, 2),
-                "reason": "Price higher than capital",
+            blocked_assets.append({
+                "asset": symbol,
+                "reason": str(e)
             })
 
-    # 6️⃣ Education
-    plan["education"] = (
-        "All prices are fetched from Angel One last traded price. "
-        "SmartRisk never shows investments that cannot be executed."
+    return portfolio, blocked_assets, total_invested
+
+
+# -------------------------------------------------------
+# Main Investment Planner Engine
+# -------------------------------------------------------
+
+def investment_planner_engine(capital: float, risk_profile: str, market_trend: str):
+
+    # --------------------------------
+    # Asset Allocation Layer
+    # --------------------------------
+
+    allocation = get_asset_allocation(capital, risk_profile)
+
+    stocks_capital = capital * allocation["stocks"] / 100
+    etf_capital = capital * allocation["etf"] / 100
+    gold_capital = capital * allocation["gold"] / 100
+    cash_reserve = capital * allocation["cash"] / 100
+
+    # --------------------------------
+    # Build Portfolios
+    # --------------------------------
+
+    stock_portfolio, stock_blocked, stock_invested = build_portfolio(
+        STOCKS,
+        stocks_capital
     )
 
-    plan["next_step"] = (
-        "Grow capital first" if capital < 50000 else
-        "Diversify slowly with discipline"
+    etf_portfolio, etf_blocked, etf_invested = build_portfolio(
+        ETFS,
+        etf_capital
     )
 
-    return plan
+    gold_portfolio, gold_blocked, gold_invested = build_portfolio(
+        GOLD,
+        gold_capital
+    )
+
+    # --------------------------------
+    # Combine Results
+    # --------------------------------
+
+    portfolio = stock_portfolio + etf_portfolio + gold_portfolio
+
+    blocked_assets = stock_blocked + etf_blocked + gold_blocked
+
+    total_invested = stock_invested + etf_invested + gold_invested
+
+    final_remaining_cash = round(capital - total_invested, 2)
+
+    # --------------------------------
+    # AI Financial Doctor Explanation
+    # --------------------------------
+
+    ai_summary = generate_ai_summary(
+        capital,
+        risk_profile,
+        allocation,
+        portfolio
+    )
+
+    # --------------------------------
+    # Final Output
+    # --------------------------------
+
+    return {
+        "capital": capital,
+        "risk_profile": risk_profile,
+        "market_trend": market_trend,
+        "asset_allocation": allocation,
+        "cash_reserve": round(cash_reserve, 2),
+        "portfolio": portfolio,
+        "blocked_assets": blocked_assets,
+        "total_invested": round(total_invested, 2),
+        "final_remaining_cash": final_remaining_cash,
+        "ai_summary": ai_summary
+    }
