@@ -396,3 +396,40 @@ def test_option_price(request):
 
     except Exception as e:
         return Response({"error": str(e)})
+# =========================================================
+# FULL OPTION CHAIN (FINAL CLEAN VERSION)
+# =========================================================
+@api_view(["GET"])
+def full_option_chain_view(request):
+
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+
+    try:
+        spot = get_ltp(symbol)
+        chain = get_market_data(symbol)
+
+        if not chain:
+            return Response({"error": "No option chain data"})
+
+        # ======================================
+        # 🔥 REMOVE NULL LTP (FINAL FIX)
+        # ======================================
+        clean_chain = [
+            x for x in chain
+            if x.get("ltp") is not None
+        ]
+
+        # ======================================
+        # 🔥 SORT BY STRIKE
+        # ======================================
+        clean_chain = sorted(clean_chain, key=lambda x: x["strike"])
+
+        return Response({
+            "symbol": symbol,
+            "spot": spot,
+            "total_strikes": len(clean_chain),
+            "data": clean_chain
+        })
+
+    except Exception as e:
+        return Response({"error": str(e)})

@@ -2,12 +2,15 @@ import time
 from coreapi.services.angel_login import get_smart_connection
 from coreapi.services.angel_ltp import get_ltp
 from coreapi.services.atm_strike import get_atm_strike
-from coreapi.services.instruments import find_option
+from coreapi.services.instruments import find_option, get_available_strikes
 
 
+# ==========================================
+# OPTION CHAIN (FINAL PRO VERSION)
+# ==========================================
 def get_option_chain(symbol="NIFTY"):
 
-    print("🚀 START OPTION CHAIN")
+    print("\n🚀 START OPTION CHAIN")
 
     smart = get_smart_connection()
 
@@ -17,14 +20,49 @@ def get_option_chain(symbol="NIFTY"):
     print("SPOT:", spot)
     print("ATM:", atm)
 
-    # 🔥 ONLY 3 STRIKES (FAST)
-    strikes = [atm - 50, atm, atm + 50]
+    # ======================================
+    # 🔥 GET ALL STRIKES
+    # ======================================
+    all_strikes = get_available_strikes(symbol)
 
+    if not all_strikes:
+        print("❌ NO STRIKES")
+        return []
+
+    # ======================================
+    # 🔥 FILTER ONLY VALID STRIKES (FINAL FIX)
+    # ======================================
+    valid_strikes = []
+
+    for strike in sorted(all_strikes, key=lambda x: abs(x - atm)):
+
+        print("\n🔍 Validating strike:", strike)
+
+        ce = find_option(symbol, strike, "CE")
+        pe = find_option(symbol, strike, "PE")
+
+        # only keep if BOTH exist
+        if ce and pe:
+            print("✅ VALID STRIKE:", strike)
+            valid_strikes.append(strike)
+
+        if len(valid_strikes) == 5:
+            break
+
+    if not valid_strikes:
+        print("❌ NO VALID STRIKES FOUND")
+        return []
+
+    print("\n🎯 FINAL VALID STRIKES:", valid_strikes)
+
+    # ======================================
+    # 🔥 FETCH DATA
+    # ======================================
     chain = []
 
-    for strike in strikes:
+    for strike in valid_strikes:
 
-        print("\n🔍 Checking strike:", strike)
+        print("\n🔍 Fetching strike:", strike)
 
         ce = find_option(symbol, strike, "CE")
         pe = find_option(symbol, strike, "PE")
@@ -33,7 +71,7 @@ def get_option_chain(symbol="NIFTY"):
         pe_price = None
 
         # =========================
-        # CE PRICE
+        # CE
         # =========================
         if ce:
             try:
@@ -44,10 +82,10 @@ def get_option_chain(symbol="NIFTY"):
             except Exception as e:
                 print("❌ CE ERROR:", e)
 
-        time.sleep(0.3)
+        time.sleep(0.2)
 
         # =========================
-        # PE PRICE
+        # PE
         # =========================
         if pe:
             try:
@@ -58,7 +96,7 @@ def get_option_chain(symbol="NIFTY"):
             except Exception as e:
                 print("❌ PE ERROR:", e)
 
-        time.sleep(0.3)
+        time.sleep(0.2)
 
         chain.append({
             "strike": strike,

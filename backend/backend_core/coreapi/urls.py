@@ -15,4 +15,5 @@ urlpatterns = [
     path("test-iv/", views.iv_test_view),
     path("option-greeks/", views.option_greeks_view),
     path("test-option-price/", views.test_option_price),
+    path("full-option-chain/", views.full_option_chain_view),
 ]
