@@ -1,19 +1,17 @@
-def pl_engine(strategy, strikes, premium_data, lot_size, lots):
+# coreapi/services/pl_engine.py
+
+def calculate_pl(strategy, strikes, premium_data, lot_size, lots):
     """
-    Calculate Max Profit, Max Loss, Breakeven
-    premium_data example:
-    {
-        "buy": 120,
-        "sell": 60
-    }
+    Dynamic P/L calculation engine
     """
 
     result = {}
 
-    # =======================
+    # =========================
     # BUY OPTION
-    # =======================
+    # =========================
     if strategy == "BUY_OPTION":
+
         buy_price = premium_data["buy"]
         strike = strikes["strike"]
 
@@ -27,10 +25,11 @@ def pl_engine(strategy, strikes, premium_data, lot_size, lots):
             "breakeven": breakeven
         }
 
-    # =======================
+    # =========================
     # DEBIT SPREAD
-    # =======================
+    # =========================
     elif strategy == "DEBIT_SPREAD":
+
         buy_price = premium_data["buy"]
         sell_price = premium_data["sell"]
 
@@ -51,28 +50,9 @@ def pl_engine(strategy, strikes, premium_data, lot_size, lots):
         }
 
     else:
+
         result = {
-            "error": "P/L not implemented for this strategy yet"
+            "error": "Strategy not implemented"
         }
-
-    # =======================
-    # Risk Reward
-    # =======================
-    if isinstance(result.get("max_profit"), (int, float)):
-        rr = round(result["max_profit"] / result["max_loss"], 2)
-    else:
-        rr = "N/A"
-
-    result["risk_reward"] = rr
-
-    # =======================
-    # Doctor Advice
-    # =======================
-    if isinstance(result.get("max_loss"), (int, float)) and result["max_loss"] <= 5000:
-        advice = "Trade allowed within acceptable risk."
-    else:
-        advice = "Risk too high for this capital. Avoid trade."
-
-    result["doctor_advice"] = advice
 
     return result

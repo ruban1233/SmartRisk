@@ -77,3 +77,4 @@ If support at {support} breaks, expect reversal.
         "expert_summary": expert_summary,
         "recommended_strategy": strategy
     }
+    

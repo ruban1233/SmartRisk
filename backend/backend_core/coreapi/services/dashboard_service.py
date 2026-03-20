@@ -1,4 +1,4 @@
-from .option_chain_service import get_option_chain
+from .options.option_chain_service import get_option_chain
 import numpy as np
 import traceback
 

@@ -1,7 +1,6 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from rest_framework import status
-from datetime import date
+from datetime import datetime
 
 # =======================
 # CORE SERVICES
@@ -9,203 +8,229 @@ from datetime import date
 
 from coreapi.services.angel_login import get_smart_connection
 from coreapi.services.angel_ltp import get_ltp
-from coreapi.services.atm_strike import get_atm_strike
 from coreapi.services.angel_candles import get_index_candles
-from coreapi.services.market_sentiment import market_sentiment_engine
-from coreapi.services.volatility_engine import volatility_engine
-from coreapi.services.capital_risk_engine import capital_risk_engine
-from coreapi.services.strategy_engine import option_advisor_engine
-from coreapi.services.investment_planner_engine import investment_planner_engine
 
-# OPTION / TIME / GREEKS
+from coreapi.services.options.option_chain_service import get_option_chain
+from coreapi.services.options.option_chain_analyzer import analyze_option_chain
+
+from coreapi.services.atm_strike import get_atm_strike
 from coreapi.services.greeks_engine import compute_greeks
 from coreapi.services.pricing_engine import intrinsic_value, extrinsic_value
-from coreapi.services.time_engine import time_to_expiry
 
-# DYNAMIC RISK
+from coreapi.services.market_sentiment import market_sentiment_engine
+from coreapi.services.volatility_engine import volatility_engine
+
+from coreapi.services.capital_risk_engine import capital_risk_engine
 from coreapi.services.dynamic_risk_engine import DynamicRiskEngine
+from coreapi.services.strategy.strategy_engine import option_advisor_engine
+from coreapi.services.investment_planner_engine import investment_planner_engine
+
+from coreapi.services.time_engine import time_to_expiry
+from coreapi.services.iv_engine import classify_iv
+
+from coreapi.services.options.angel_greeks_service import get_option_greeks, process_greeks
+from coreapi.services.options.local_greeks_chain import build_greeks_chain
+from coreapi.services.options.option_ltp import get_option_ltp_from_chain
 
 
-# =======================
-# SYSTEM / HEALTH
-# =======================
+# =========================================================
+# CACHE
+# =========================================================
+LAST_OPTION_CHAIN = {}
 
+
+def get_market_data(symbol):
+    global LAST_OPTION_CHAIN
+    try:
+        data = get_option_chain(symbol)
+        if data:
+            LAST_OPTION_CHAIN[symbol] = data
+            return data
+    except:
+        pass
+    return LAST_OPTION_CHAIN.get(symbol, [])
+
+
+# =========================================================
+# EXPIRY
+# =========================================================
+def get_nearest_expiry(symbol):
+    chain = get_market_data(symbol)
+
+    if not chain:
+        return None
+
+    expiries = sorted(set([x.get("expiry") for x in chain if x.get("expiry")]))
+
+    if not expiries:
+        return None
+
+    try:
+        nearest = expiries[0]
+        dt = datetime.strptime(nearest, "%Y-%m-%d")
+        return dt.strftime("%d%b%Y").upper()
+    except:
+        return None
+
+
+# =========================================================
+# HEALTH
+# =========================================================
 @api_view(["GET"])
 def health(request):
     return Response({"status": "ok"})
 
 
+# =========================================================
+# LOGIN
+# =========================================================
 @api_view(["GET"])
 def angel_login(request):
-    """
-    Safe Angel login check
-    """
     try:
         session = get_smart_connection()
-        if session:
-            return Response({"status": "connected"})
-        else:
-            return Response({"status": "failed"})
+        return Response({"status": "connected" if session else "failed"})
     except Exception as e:
-        return Response({"status": "error", "message": str(e)})
+        return Response({"error": str(e)})
 
 
+# =========================================================
+# MARKET STATUS
+# =========================================================
 @api_view(["GET"])
 def market_status(request):
     return Response({"market": "connected"})
 
 
-# =======================
-# MARKET DATA
-# =======================
-
+# =========================================================
+# LTP
+# =========================================================
 @api_view(["GET"])
 def test_ltp_view(request):
     symbol = request.GET.get("symbol", "NIFTY").upper()
-
-    try:
-        ltp = get_ltp(symbol)
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
-
-    return Response({
-        "symbol": symbol,
-        "ltp": ltp
-    })
+    return Response({"symbol": symbol, "ltp": get_ltp(symbol)})
 
 
+# =========================================================
+# ATM STRIKE
+# =========================================================
 @api_view(["GET"])
 def atm_strike_view(request):
-    symbol = request.GET.get("symbol")
-
-    if not symbol:
-        return Response({"error": "symbol required"}, status=400)
-
-    symbol = symbol.upper()
-
-    try:
-        ltp = get_ltp(symbol)
-        atm = get_atm_strike(ltp, symbol)
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+    spot = get_ltp(symbol)
+    atm = get_atm_strike(spot, symbol)
 
     return Response({
         "symbol": symbol,
-        "ltp": ltp,
+        "spot": spot,
         "atm_strike": atm
     })
 
 
-# =======================
+# =========================================================
 # MARKET SENTIMENT
-# =======================
-
+# =========================================================
 @api_view(["GET"])
 def market_sentiment_view(request):
+
     symbol = request.GET.get("symbol", "NIFTY").upper()
 
     try:
         candles = get_index_candles(symbol)
         sentiment = market_sentiment_engine(candles)
-    except Exception:
+    except:
         sentiment = {"trend": "Sideways", "strength": "Weak"}
 
-    return Response({
-        "symbol": symbol,
-        "trend": sentiment["trend"],
-        "strength": sentiment["strength"]
-    })
+    return Response(sentiment)
 
 
-# =======================
-# 🚦 SMART RISK ENGINE
-# =======================
+# =========================================================
+# OPTION CHAIN ANALYSIS
+# =========================================================
+@api_view(["GET"])
+def option_chain_analysis_view(request):
 
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+
+    spot = get_ltp(symbol)
+    chain = get_market_data(symbol)
+
+    if not chain:
+        return Response({"error": "No chain"})
+
+    analysis = analyze_option_chain(chain, spot)
+
+    return Response(analysis)
+
+
+# =========================================================
+# SMART RISK ENGINE
+# =========================================================
 @api_view(["GET"])
 def smartrisk_view(request):
 
     symbol = request.GET.get("symbol", "NIFTY").upper()
     capital = float(request.GET.get("capital", 25000))
 
-    # Spot
-    try:
-        spot = get_ltp(symbol)
-    except Exception:
-        spot = None
+    spot = get_ltp(symbol)
+    chain = get_market_data(symbol)
 
-    # Sentiment
-    try:
-        candles = get_index_candles(symbol)
-        sentiment = market_sentiment_engine(candles)
-    except Exception:
-        sentiment = {"trend": "Sideways", "strength": "Weak"}
+    if not chain:
+        return Response({"error": "No option chain"})
 
-    # Volatility
-    try:
-        vol = volatility_engine(symbol)
-        iv = float(vol.get("iv", 18))
-    except Exception:
-        iv = 18
+    analysis = analyze_option_chain(chain, spot)
+    atm = analysis.get("atm_strike")
 
-    iv_level = "low" if iv < 15 else "normal" if iv < 25 else "high"
+    closest = min(chain, key=lambda x: abs(float(
+        x.get("strike", x.get("strikePrice", 0))
+    ) - float(atm)))
 
-    days_to_expiry = time_to_expiry(date.today())
+    target_strike = float(closest.get("strike", closest.get("strikePrice")))
 
-    atm = get_atm_strike(spot or 0, symbol)
-    option_price = abs((spot or 0) - atm) + 100
+    ce_option = None
+
+    for x in chain:
+        s = float(x.get("strike", x.get("strikePrice", 0)))
+
+        if s == target_strike:
+            opt_type = x.get("option_type") or x.get("optionType")
+
+            if opt_type == "CE":
+                ce_option = x
+
+    premium = get_option_ltp_from_chain(ce_option) or 100
 
     greeks = compute_greeks(
-        S=spot or 0,
-        K=atm,
-        T=days_to_expiry / 365,
+        S=spot,
+        K=target_strike,
+        T=0.01,
         r=0.05,
-        sigma=iv / 100,
+        sigma=0.2,
         option_type="CE"
     )
 
-    theta = greeks.get("theta", 0)
-
-    risk_engine = DynamicRiskEngine(
+    risk = DynamicRiskEngine(
         capital=capital,
-        days_to_expiry=days_to_expiry,
-        option_premium=option_price,
-        theta=theta,
-        iv_level=iv_level,
+        days_to_expiry=5,
+        option_premium=premium,
+        theta=greeks.get("theta", 0),
+        iv_level="normal",
         strategy_type="unknown"
-    )
-
-    risk = risk_engine.evaluate()
-    capital_info = capital_risk_engine(capital)
-
-    option_advice = None
-    if risk["signal"] != "RED":
-        try:
-            option_advice = option_advisor_engine(
-                symbol=symbol,
-                capital=int(capital)
-            )
-        except Exception:
-            option_advice = None
+    ).evaluate()
 
     return Response({
         "symbol": symbol,
-        "spot_price": spot,
+        "spot": spot,
+        "atm_used": target_strike,
+        "premium": premium,
+        "greeks": greeks,
         "risk": risk,
-        "market": {
-            "sentiment": sentiment,
-            "iv": iv,
-            "iv_level": iv_level,
-            "days_to_expiry": days_to_expiry
-        },
-        "capital": capital_info,
-        "option_advisory": option_advice
+        "capital": capital_risk_engine(capital)
     })
 
 
-# =======================
-# 💼 INVESTMENT PLANNER
-# =======================
-
+# =========================================================
+# INVESTMENT PLANNER
+# =========================================================
 @api_view(["GET"])
 def investment_planner_view(request):
 
@@ -213,76 +238,161 @@ def investment_planner_view(request):
     risk_profile = request.GET.get("risk", "low")
     symbol = request.GET.get("symbol", "NIFTY").upper()
 
-    if capital < 10000:
-        return Response({
-            "capital_entered": capital,
-            "investment_plan": "Capital too low"
-        })
-
     try:
         candles = get_index_candles(symbol)
         sentiment = market_sentiment_engine(candles)
-        market_trend = sentiment["trend"]
-    except Exception:
+        market_trend = sentiment.get("trend", "Sideways")
+    except:
         market_trend = "Sideways"
 
-    try:
-        plan = investment_planner_engine(
-            capital=capital,
-            risk_profile=risk_profile,
-            market_trend=market_trend
-        )
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
+    plan = investment_planner_engine(
+        capital=capital,
+        risk_profile=risk_profile,
+        market_trend=market_trend
+    )
 
     return Response({
-        "capital_entered": capital,
+        "capital": capital,
         "market_trend": market_trend,
-        "investment_plan": plan
+        "plan": plan
     })
 
 
-# =======================
-# 🧮 OPTION DOCTOR
-# =======================
-
+# =========================================================
+# OPTION DOCTOR
+# =========================================================
 @api_view(["GET"])
 def option_doctor_view(request):
 
     symbol = request.GET.get("symbol", "NIFTY").upper()
     strike = float(request.GET.get("strike", 0))
-    option_type = request.GET.get("type", "CE")
 
-    try:
-        spot = get_ltp(symbol)
-    except Exception:
-        spot = 0
-
-    option_price = abs(spot - strike) + 120
-    iv = 0.18
-    T = time_to_expiry(date.today()) / 365
+    spot = get_ltp(symbol)
 
     greeks = compute_greeks(
         S=spot,
         K=strike,
-        T=T,
+        T=0.01,
         r=0.05,
-        sigma=iv,
-        option_type=option_type
+        sigma=0.2,
+        option_type="CE"
     )
 
-    intrinsic = intrinsic_value(spot, strike, option_type)
-    extrinsic = extrinsic_value(option_price, intrinsic)
+    intrinsic = intrinsic_value(spot, strike, "CE")
+    extrinsic = extrinsic_value(100, intrinsic)
 
     return Response({
         "symbol": symbol,
-        "spot_price": spot,
+        "spot": spot,
         "strike": strike,
-        "option_type": option_type,
+        "greeks": greeks,
         "pricing": {
-            "option_price": option_price,
             "intrinsic": intrinsic,
             "extrinsic": extrinsic
-        },
-        "greeks": greeks
+        }
     })
+
+
+# =========================================================
+# IV TEST
+# =========================================================
+@api_view(["GET"])
+def iv_test_view(request):
+
+    iv = request.GET.get("iv")
+
+    if iv is None:
+        return Response({"error": "Provide iv value"})
+
+    return Response({
+        "input_iv": float(iv),
+        "classification": classify_iv(float(iv))
+    })
+
+
+# =========================================================
+# OPTION GREEKS
+# =========================================================
+@api_view(["GET"])
+def option_greeks_view(request):
+
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+
+    spot = get_ltp(symbol)
+    expiry = get_nearest_expiry(symbol)
+
+    raw = get_option_greeks(symbol, expiry)
+
+    if raw.get("status"):
+        data = process_greeks(raw)
+        if data:
+            return Response({
+                "symbol": symbol,
+                "expiry": expiry,
+                "greeks": data[:30]
+            })
+
+    return Response({
+        "symbol": symbol,
+        "expiry": expiry,
+        "greeks": build_greeks_chain(spot)
+    })
+
+
+# =========================================================
+# TEST OPTION PRICE
+# =========================================================
+@api_view(["GET"])
+def test_option_price(request):
+
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+    strike = float(request.GET.get("strike", 0))
+
+    try:
+        spot = get_ltp(symbol)
+        chain = get_market_data(symbol)
+
+        if not chain:
+            return Response({"error": "No option chain data"})
+
+        closest = min(chain, key=lambda x: abs(float(
+            x.get("strike", x.get("strikePrice", 0))
+        ) - float(strike)))
+
+        target_strike = float(closest.get("strike", closest.get("strikePrice")))
+
+        ce_option = None
+        pe_option = None
+
+        for x in chain:
+            s = float(x.get("strike", x.get("strikePrice", 0)))
+
+            if s == target_strike:
+
+                opt_type = (
+                    x.get("option_type")
+                    or x.get("optionType")
+                    or x.get("type")
+                )
+
+                if opt_type == "CE":
+                    ce_option = x
+
+                elif opt_type == "PE":
+                    pe_option = x
+
+        ce_price = get_option_ltp_from_chain(ce_option)
+        pe_price = get_option_ltp_from_chain(pe_option)
+
+        return Response({
+            "symbol": symbol,
+            "spot": spot,
+            "requested_strike": strike,
+            "used_strike": target_strike,
+            "CE_price": ce_price,
+            "PE_price": pe_price,
+            "debug_sample": chain[:2]
+        })
+
+    except Exception as e:
+        return Response({"error": str(e)})
