@@ -16,4 +16,8 @@ urlpatterns = [
     path("option-greeks/", views.option_greeks_view),
     path("test-option-price/", views.test_option_price),
     path("full-option-chain/", views.full_option_chain_view),
+
+    # 🔥 NEW (ONLY ADD THIS)
+    path("ai-strategy/", views.ai_strategy_view),
+    path("payoff/", views.payoff_view),
 ]

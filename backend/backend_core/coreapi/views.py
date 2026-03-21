@@ -31,8 +31,7 @@ from coreapi.services.iv_engine import classify_iv
 from coreapi.services.options.angel_greeks_service import get_option_greeks, process_greeks
 from coreapi.services.options.local_greeks_chain import build_greeks_chain
 from coreapi.services.options.option_ltp import get_option_ltp_from_chain
-
-
+from coreapi.services.strategy.payoff_engine import calculate_payoff, calculate_summary
 # =========================================================
 # CACHE
 # =========================================================
@@ -433,3 +432,176 @@ def full_option_chain_view(request):
 
     except Exception as e:
         return Response({"error": str(e)})
+#=========================================================
+# AI STRATEGY
+# =========================================================
+@api_view(["GET"])
+def ai_strategy_view(request):
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+    capital = float(request.GET.get("capital", 10000))
+    iv = float(request.GET.get("iv", 15))
+
+    chain = get_market_data(symbol)
+    spot = get_ltp(symbol)
+
+    if not chain:
+        return Response({"error": "No chain"})
+
+    return Response({
+        "symbol": symbol,
+        "result": analyze_option_chain(chain, spot, capital, iv)
+    })
+# =========================================================
+# PAYOFF ENGINE (FINAL WORKING PRO VERSION - FIXED)
+# =========================================================
+@api_view(["GET"])
+def payoff_view(request):
+
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+    spot = get_ltp(symbol)
+    chain = get_market_data(symbol)
+
+    if not chain:
+        return Response({"error": "No option data"})
+
+    atm = get_atm_strike(spot, symbol)
+
+    # ================================
+    # STRIKES
+    # ================================
+    strikes = sorted(set([
+        float(x.get("strike", x.get("strikePrice", 0)))
+        for x in chain
+    ]))
+
+    if not strikes:
+        return Response({"error": "No strikes found"})
+
+    # ================================
+    # FIND OPTION
+    # ================================
+    def find_option(strike, typ):
+        for x in chain:
+            s = float(x.get("strike", x.get("strikePrice", 0)))
+            t = x.get("option_type") or x.get("optionType")
+            if s == strike and t == typ:
+                return x
+        return None
+
+    # ================================
+    # 🔥 SMART DISTANCE (FIXED CORE)
+    # ================================
+    step = 100
+    hedge_step = 100
+
+    # SELL STRIKES
+    pe_sell_strike = min(strikes, key=lambda x: abs(x - (atm - step)))
+    ce_sell_strike = min(strikes, key=lambda x: abs(x - (atm + step)))
+
+    # -------------------------------
+    # SAFE BUY STRIKES (FINAL FIX)
+    # -------------------------------
+
+    # FORCE strictly lower
+    lower_strikes = sorted([s for s in strikes if s < pe_sell_strike])
+    if lower_strikes:
+        pe_buy_strike = lower_strikes[-1]
+    else:
+        # fallback: force far strike
+        pe_buy_strike = min(strikes, key=lambda x: abs(x - (pe_sell_strike - 200)))
+
+    # FORCE strictly higher
+    higher_strikes = sorted([s for s in strikes if s > ce_sell_strike])
+    if higher_strikes:
+        ce_buy_strike = higher_strikes[0]
+    else:
+        ce_buy_strike = min(strikes, key=lambda x: abs(x - (ce_sell_strike + 200)))
+
+    # FINAL SAFETY (NEVER SAME STRIKE)
+    if pe_buy_strike == pe_sell_strike:
+        pe_buy_strike = min(strikes, key=lambda x: abs(x - (pe_sell_strike - 200)))
+
+    if ce_buy_strike == ce_sell_strike:
+        ce_buy_strike = min(strikes, key=lambda x: abs(x - (ce_sell_strike + 200)))
+
+    print("🎯 FINAL STRIKES:",
+          pe_sell_strike, pe_buy_strike,
+          ce_sell_strike, ce_buy_strike)
+
+    # ================================
+    # FETCH OPTIONS
+    # ================================
+    pe_sell = find_option(pe_sell_strike, "PE")
+    pe_buy = find_option(pe_buy_strike, "PE")
+    ce_sell = find_option(ce_sell_strike, "CE")
+    ce_buy = find_option(ce_buy_strike, "CE")
+
+    if not all([pe_sell, pe_buy, ce_sell, ce_buy]):
+        return Response({
+            "error": "Option data missing",
+            "debug": {
+                "pe_sell": pe_sell_strike,
+                "pe_buy": pe_buy_strike,
+                "ce_sell": ce_sell_strike,
+                "ce_buy": ce_buy_strike
+            }
+        })
+
+    # ================================
+    # PREMIUM
+    # ================================
+    pe_sell_premium = get_option_ltp_from_chain(pe_sell)
+    pe_buy_premium  = get_option_ltp_from_chain(pe_buy)
+    ce_sell_premium = get_option_ltp_from_chain(ce_sell)
+    ce_buy_premium  = get_option_ltp_from_chain(ce_buy)
+
+    if None in [pe_sell_premium, pe_buy_premium, ce_sell_premium, ce_buy_premium]:
+        return Response({"error": "Premium missing"})
+
+    # ================================
+    # CREDIT CALCULATION
+    # ================================
+    pe_credit = pe_sell_premium - pe_buy_premium
+    ce_credit = ce_sell_premium - ce_buy_premium
+    total_credit = pe_credit + ce_credit
+
+    print("💰 CREDIT:", total_credit)
+
+    if total_credit <= 0:
+        return Response({
+            "error": "Invalid strategy",
+            "reason": "Spread still too tight",
+            "calculation": {
+                "pe_sell": pe_sell_premium,
+                "pe_buy": pe_buy_premium,
+                "ce_sell": ce_sell_premium,
+                "ce_buy": ce_buy_premium
+            }
+        })
+
+    # ================================
+    # LEGS
+    # ================================
+    legs = [
+        {"type": "PE", "action": "SELL", "strike": pe_sell_strike, "premium": pe_sell_premium},
+        {"type": "PE", "action": "BUY", "strike": pe_buy_strike, "premium": pe_buy_premium},
+        {"type": "CE", "action": "SELL", "strike": ce_sell_strike, "premium": ce_sell_premium},
+        {"type": "CE", "action": "BUY", "strike": ce_buy_strike, "premium": ce_buy_premium},
+    ]
+
+    # ================================
+    # PAYOFF
+    # ================================
+    payoff = calculate_payoff(legs)
+    summary = calculate_summary(payoff)
+
+    return Response({
+        "symbol": symbol,
+        "spot": spot,
+        "atm": atm,
+        "strategy": "Iron Condor",
+        "credit": round(total_credit, 2),
+        "legs": legs,
+        "summary": summary,
+        "payoff_chart": payoff[:50]
+    })

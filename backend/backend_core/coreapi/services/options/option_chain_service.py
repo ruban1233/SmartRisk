@@ -6,7 +6,7 @@ from coreapi.services.instruments import find_option, get_available_strikes
 
 
 # ==========================================
-# OPTION CHAIN (FINAL PRO VERSION)
+# OPTION CHAIN (FINAL PRO VERSION - FIXED)
 # ==========================================
 def get_option_chain(symbol="NIFTY"):
 
@@ -30,24 +30,33 @@ def get_option_chain(symbol="NIFTY"):
         return []
 
     # ======================================
-    # 🔥 FILTER ONLY VALID STRIKES (FINAL FIX)
+    # 🔥 EXPAND RANGE (CRITICAL FIX)
+    # ======================================
+    RANGE = 10   # ← controls how many strikes around ATM
+
+    sorted_strikes = sorted(all_strikes, key=lambda x: abs(x - atm))
+
+    selected_strikes = sorted(sorted_strikes[:RANGE])
+
+    print("\n🎯 SELECTED STRIKES:", selected_strikes)
+
+    # ======================================
+    # 🔥 VALIDATE STRIKES (CE + PE must exist)
     # ======================================
     valid_strikes = []
 
-    for strike in sorted(all_strikes, key=lambda x: abs(x - atm)):
+    for strike in selected_strikes:
 
         print("\n🔍 Validating strike:", strike)
 
         ce = find_option(symbol, strike, "CE")
         pe = find_option(symbol, strike, "PE")
 
-        # only keep if BOTH exist
         if ce and pe:
             print("✅ VALID STRIKE:", strike)
             valid_strikes.append(strike)
-
-        if len(valid_strikes) == 5:
-            break
+        else:
+            print("❌ INVALID STRIKE:", strike)
 
     if not valid_strikes:
         print("❌ NO VALID STRIKES FOUND")
@@ -56,7 +65,7 @@ def get_option_chain(symbol="NIFTY"):
     print("\n🎯 FINAL VALID STRIKES:", valid_strikes)
 
     # ======================================
-    # 🔥 FETCH DATA
+    # 🔥 FETCH LTP DATA
     # ======================================
     chain = []
 
@@ -82,7 +91,7 @@ def get_option_chain(symbol="NIFTY"):
             except Exception as e:
                 print("❌ CE ERROR:", e)
 
-        time.sleep(0.2)
+        time.sleep(0.15)
 
         # =========================
         # PE
@@ -96,8 +105,11 @@ def get_option_chain(symbol="NIFTY"):
             except Exception as e:
                 print("❌ PE ERROR:", e)
 
-        time.sleep(0.2)
+        time.sleep(0.15)
 
+        # =========================
+        # STORE DATA
+        # =========================
         chain.append({
             "strike": strike,
             "option_type": "CE",
