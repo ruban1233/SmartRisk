@@ -32,7 +32,7 @@ def get_option_chain(symbol="NIFTY"):
     # ======================================
     # 🔥 EXPAND RANGE (CRITICAL FIX)
     # ======================================
-    RANGE = 10   # ← controls how many strikes around ATM
+    RANGE = 20   # ← controls how many strikes around ATM
 
     sorted_strikes = sorted(all_strikes, key=lambda x: abs(x - atm))
 
