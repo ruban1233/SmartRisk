@@ -1,6 +1,7 @@
 import pandas as pd
 import json
 import os
+from datetime import datetime
 
 INSTRUMENT_DF = None
 
@@ -49,11 +50,11 @@ def get_strike_step(symbol):
     elif symbol == "MIDCPNIFTY":
         return 25
     else:
-        return 50   # stocks
+        return 50
 
 
 # ==========================================
-# GET VALID STRIKES ONLY
+# GET VALID STRIKES
 # ==========================================
 def get_available_strikes(symbol):
     df = load_instruments()
@@ -71,16 +72,44 @@ def get_available_strikes(symbol):
 
     step = get_strike_step(symbol)
 
-    # 🔥 keep only valid strikes
     valid_strikes = [s for s in strikes if s % step == 0]
 
     return valid_strikes
 
 
 # ==========================================
-# FIND OPTION TOKEN
+# GET NEAREST EXPIRY (🔥 FIXED)
 # ==========================================
-def find_option(symbol, strike, option_type):
+def get_nearest_expiry(df):
+
+    expiries = df["expiry"].unique()
+
+    valid_expiries = []
+
+    for exp in expiries:
+        try:
+            dt = datetime.strptime(exp, "%d%b%Y")
+            if dt >= datetime.today():
+                valid_expiries.append((dt, exp))
+        except:
+            continue
+
+    if not valid_expiries:
+        return None
+
+    valid_expiries.sort()
+
+    selected = valid_expiries[0][1]
+
+    print("🔥 USING EXPIRY:", selected)
+
+    return selected
+
+
+# ==========================================
+# FIND OPTION TOKEN (🔥 FINAL FIX)
+# ==========================================
+def find_option(symbol, strike, option_type, selected_expiry=None):
 
     df = load_instruments()
 
@@ -93,15 +122,19 @@ def find_option(symbol, strike, option_type):
         print("❌ NO DATA:", symbol)
         return None
 
-    expiries = sorted(df["expiry"].unique())
+    # 🔥 USE USER SELECTED EXPIRY (if given)
+    if selected_expiry:
+        expiry = selected_expiry
+        print("📌 USING USER EXPIRY:", expiry)
+    else:
+        expiry = get_nearest_expiry(df)
+        print("🔥 AUTO EXPIRY:", expiry)
 
-    if not expiries:
-        print("❌ NO EXPIRY")
+    if not expiry:
+        print("❌ NO VALID EXPIRY")
         return None
 
-    expiry = expiries[0]
-
-    target = round(strike * 100)
+    target = int(strike * 100)
 
     result = df[
         (df["expiry"] == expiry) &
