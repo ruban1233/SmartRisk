@@ -8,11 +8,14 @@ Path: backend/backend_core/coreapi/views.py
 ✔ Real payoff with correct intrinsic
 ✔ Expiry auto-detected (weekly/monthly)
 ✔ Risk signal with advice
+✔ CE + PE Greeks side by side (FIXED — no duplicate keys)
 """
+
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from datetime import datetime
+
 
 # =======================
 # CORE SERVICES
@@ -21,21 +24,26 @@ from coreapi.services.angel_login import get_smart_connection
 from coreapi.services.angel_ltp import get_ltp
 from coreapi.services.angel_candles import get_index_candles
 
+
 from coreapi.services.options.option_chain_service import get_option_chain
 from coreapi.services.options.option_chain_analyzer import analyze_option_chain
+
 
 from coreapi.services.atm_strike import get_atm_strike
 from coreapi.services.greeks_engine import compute_greeks
 from coreapi.services.pricing_engine import intrinsic_value, extrinsic_value
 
+
 from coreapi.services.market_sentiment import market_sentiment_engine
 from coreapi.services.volatility_engine import volatility_engine
+
 
 from coreapi.services.capital_risk_engine import get_capital_summary as capital_risk_engine
 from coreapi.services.dynamic_risk_engine import DynamicRiskEngine
 from coreapi.services.strategy.strategy_engine import run_strategy_engine
 from coreapi.services.investment_planner_engine import investment_planner_engine
 from coreapi.services.instruments import get_lot_size
+
 
 from coreapi.services.time_engine import time_to_expiry
 from coreapi.services.iv_engine import classify_iv
@@ -45,7 +53,6 @@ from coreapi.services.options.angel_greeks_service import (
     process_greeks,
     format_expiry_display,
     get_days_to_expiry,
-   
 )
 from coreapi.services.options.local_greeks_chain import build_greeks_chain
 from coreapi.services.options.option_ltp import get_option_ltp_from_chain
@@ -76,6 +83,7 @@ def get_market_data(symbol, expiry=None):
 # EXPIRY HELPERS
 # =========================================================
 
+
 def get_nearest_expiry(symbol):
     """
     Auto-detect nearest expiry:
@@ -105,6 +113,7 @@ def get_nearest_expiry(symbol):
 # =========================================================
 # REAL LTP FROM CHAIN HELPER
 # =========================================================
+
 
 def get_real_ltp_map(chain, atm_strike, symbol):
     """
@@ -245,8 +254,8 @@ def option_chain_analysis_view(request):
 @api_view(["GET"])
 def smartrisk_view(request):
 
-    symbol  = request.GET.get("symbol",  "NIFTY").upper()
-    capital = float(request.GET.get("capital", 25000))
+    symbol          = request.GET.get("symbol",  "NIFTY").upper()
+    capital         = float(request.GET.get("capital", 25000))
     selected_expiry = request.GET.get("expiry", None)
     print("🔥 FRONTEND EXPIRY:", selected_expiry)
 
@@ -257,7 +266,7 @@ def smartrisk_view(request):
     spot = get_ltp(symbol)
     if not spot:
         return Response({
-            "error": True,
+            "error":   True,
             "message": f"Cannot fetch live spot price for {symbol}. Check Angel One connection."
         })
 
@@ -269,7 +278,6 @@ def smartrisk_view(request):
     print(f"[SMARTRISK] ATM={atm}")
 
     # ── Step 4: Expiry (auto-detected from chain or computed)
-    # ✅ USE FRONTEND EXPIRY IF PROVIDED
     if selected_expiry:
         expiry = selected_expiry.upper()
     else:
@@ -277,7 +285,7 @@ def smartrisk_view(request):
 
     expiry_display = format_expiry_display(expiry)
     days_to_expiry = get_days_to_expiry(expiry)
-    lot_size = get_lot_size(symbol, expiry)
+    lot_size       = get_lot_size(symbol, expiry)
 
     print(f"[SMARTRISK] FINAL EXPIRY={expiry}  dte={days_to_expiry}")
 
@@ -285,7 +293,7 @@ def smartrisk_view(request):
     chain = get_market_data(symbol, expiry)
     if not chain:
         return Response({
-            "error": True,
+            "error":   True,
             "message": "No option chain data available. Try again in 30 seconds."
         })
 
@@ -340,6 +348,7 @@ def smartrisk_view(request):
     pe_greeks     = None
     greeks_source = "fallback"
     greeks        = {}
+    greeks_data   = {}          # ← always defined so Step 12 can safely read it
 
     try:
         greeks_data   = get_real_greeks_for_strategy(symbol, atm, expiry)
@@ -380,6 +389,10 @@ def smartrisk_view(request):
                 "iv":    iv,
             }
 
+    # ── IV Analysis
+    iv_value   = ce_greeks.get("iv") if ce_greeks else iv
+    iv_analysis = classify_iv(iv_value)
+
     # ── Step 10: Dynamic risk engine
     risk = {"risk_score": 50, "signal": "YELLOW", "reasons": []}
     try:
@@ -389,8 +402,10 @@ def smartrisk_view(request):
             option_premium = premium,
             theta          = greeks.get("theta", 0),
             iv_level       = "high" if iv > 60 else "normal",
-            strategy_type  = strategy_data.get("strategy", {}).get("key", "unknown")
-                             if strategy_data.get("strategy") else "unknown",
+            strategy_type  = (
+                strategy_data.get("strategy", {}).get("key", "unknown")
+                if strategy_data.get("strategy") else "unknown"
+            ),
         ).evaluate()
     except Exception as e:
         print(f"[WARN] Risk engine failed: {e}")
@@ -417,48 +432,58 @@ def smartrisk_view(request):
             signal_advice.append("🚫 RED signal — do NOT enter trade. Wait for YELLOW or GREEN.")
         signal_advice.append("✅ GREEN signal requires: defined-risk strategy + normal IV (20-50) + adequate capital.")
 
-    # ── Step 12: Build final response
+    # ── Step 12: Build final response  (NO duplicate keys)
     return Response({
-        # Market data
-        "symbol":         symbol,
-        "spot":           spot,
-        "trend":          trend,
-        "iv_percentile":  round(iv, 2),
+        # ── Market data
+        "symbol":        symbol,
+        "spot":          spot,
+        "trend":         trend,
+        "iv_percentile": round(iv, 2),
 
-        # Expiry
+        # ── Greeks — new CE/PE structure (used by table in frontend)
+        "greeks": {
+            "ce":     ce_greeks,
+            "pe":     pe_greeks,
+            "source": greeks_source,
+        },
+
+        # ── Greeks — flat structure (used by GreeksPanel fallback)
+        "greeks_flat":   greeks,
+        "ce_greeks":     ce_greeks,
+        "pe_greeks":     pe_greeks,
+        "greeks_source": greeks_source,
+
+        # ── IV analysis (Step 3)
+        "iv_analysis": iv_analysis,
+
+        # ── Expiry
         "expiry":         expiry,
         "expiry_display": expiry_display,
         "days_to_expiry": days_to_expiry,
 
-        # ATM
-        "atm_price":      atm,
-        "atm_used":       atm,
-        "lot_size": lot_size,
+        # ── ATM
+        "atm_price": atm,
+        "atm_used":  atm,
+        "lot_size":  lot_size,
 
-        # Strategy
+        # ── Strategy
         "strategy":       strategy_data.get("strategy"),
         "legs":           strategy_data.get("legs", []),
         "net_premium":    strategy_data.get("net_premium"),
         "traffic_signal": strategy_data.get("traffic_signal"),
         "capital_data":   strategy_data.get("capital_data"),
 
-        # Payoff
+        # ── Payoff
         "payoff":         strategy_data.get("payoff", []),
         "payoff_summary": strategy_data.get("payoff_summary", {}),
 
-        # Greeks
-        "greeks":         greeks,
-        "ce_greeks":      ce_greeks,
-        "pe_greeks":      pe_greeks,
-        "greeks_source":  greeks_source,
+        # ── Risk
+        "premium":       premium,
+        "risk":          risk,
+        "signal_advice": signal_advice,
+        "capital":       capital,
 
-        # Risk
-        "premium":        premium,
-        "risk":           risk,
-        "signal_advice":  signal_advice,
-        "capital":        capital,
-
-        # Debug (remove in production)
+        # ── Debug (remove in production)
         "strategy_suggestions": strategy_data,
         "real_ltp_map":         ltp_map,
     })
@@ -503,10 +528,7 @@ def option_doctor_view(request):
     step   = 100 if symbol == "BANKNIFTY" else 50
     T      = max(get_days_to_expiry(get_nearest_expiry(symbol)) / 365.0, 0.001)
 
-    greeks = compute_greeks(
-        S=spot, K=strike, T=T,
-        r=0.065, sigma=0.18, option_type="CE"
-    )
+    greeks    = compute_greeks(S=spot, K=strike, T=T, r=0.065, sigma=0.18, option_type="CE")
     intrinsic = intrinsic_value(spot, strike, "CE")
     extrinsic = extrinsic_value(100, intrinsic)
 
@@ -631,17 +653,13 @@ def test_option_price(request):
 
 
 # =========================================================
-# FULL OPTION CHAIN
-# =========================================================
-# =========================================================
-# FULL OPTION CHAIN (🔥 FIXED VERSION)
+# FULL OPTION CHAIN (FIXED VERSION)
 # =========================================================
 @api_view(["GET"])
 def full_option_chain_view(request):
-    symbol = request.GET.get("symbol", "NIFTY").upper()
+    symbol       = request.GET.get("symbol", "NIFTY").upper()
     expiry_param = request.GET.get("expiry", None)
 
-    # ✅ FIX: Respect frontend expiry
     if expiry_param:
         expiry = expiry_param.upper()
         print("📥 FRONTEND EXPIRY:", expiry)
@@ -650,44 +668,34 @@ def full_option_chain_view(request):
         print("⚠️ USING AUTO EXPIRY:", expiry)
 
     try:
-        spot = get_ltp(symbol)
-
+        spot  = get_ltp(symbol)
         print("🔥 FINAL EXPIRY USED:", expiry)
-
-        # ✅ Pass expiry correctly
         chain = get_market_data(symbol, expiry)
 
         if not chain:
             return Response({
                 "error": "No option chain data",
-                "debug": {
-                    "symbol": symbol,
-                    "expiry": expiry
-                }
+                "debug": {"symbol": symbol, "expiry": expiry}
             })
 
-        # Clean + sort
         clean = sorted(
             [x for x in chain if x.get("ltp") is not None],
             key=lambda x: float(x.get("strike", 0))
         )
 
         return Response({
-            "symbol": symbol,
-            "spot": spot,
-            "expiry": expiry,
+            "symbol":         symbol,
+            "spot":           spot,
+            "expiry":         expiry,
             "expiry_display": format_expiry_display(expiry),
-            "total_strikes": len(clean),
-            "data": clean,
+            "total_strikes":  len(clean),
+            "data":           clean,
         })
 
     except Exception as e:
         return Response({
             "error": str(e),
-            "debug": {
-                "symbol": symbol,
-                "expiry": expiry
-            }
+            "debug": {"symbol": symbol, "expiry": expiry}
         })
 
 
@@ -839,8 +847,10 @@ def expiry_info_view(request):
         "days_to_weekly":  get_days_to_expiry(weekly),
         "days_to_monthly": get_days_to_expiry(monthly),
     })
+
+
 # =========================================================
-# GET ALL VALID EXPIRIES (🔥 NEW)
+# GET ALL VALID EXPIRIES
 # =========================================================
 @api_view(["GET"])
 def get_expiries_view(request):
@@ -850,7 +860,6 @@ def get_expiries_view(request):
     symbol = request.GET.get("symbol", "NIFTY").upper()
 
     df = load_instruments()
-
     df["name"] = df["name"].str.upper()
     df = df[df["name"] == symbol]
 
@@ -858,26 +867,20 @@ def get_expiries_view(request):
         return Response({"error": "No data for symbol"})
 
     expiries = df["expiry"].unique()
-
-    valid = []
+    valid    = []
 
     for exp in expiries:
         try:
             dt = datetime.strptime(exp, "%d%b%Y")
-
-            # only future expiries
             if dt >= datetime.today():
                 valid.append((dt, exp))
-        except:
+        except Exception:
             continue
 
-    # sort ascending
     valid.sort()
-
-    # only take first 10
     final = [e[1] for e in valid[:10]]
 
     return Response({
-        "symbol": symbol,
+        "symbol":   symbol,
         "expiries": final
     })
