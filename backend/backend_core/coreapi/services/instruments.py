@@ -25,11 +25,11 @@ def load_instruments():
 
     df = pd.DataFrame(data)
 
-    # Only derivatives
+    # Only derivatives (NFO)
     df = df[df["exch_seg"] == "NFO"]
 
     # Fix datatype
-    df["strike"] = df["strike"].astype(float)
+    df["strike"] = pd.to_numeric(df["strike"], errors="coerce")
 
     INSTRUMENT_DF = df
     return df
@@ -65,7 +65,7 @@ def get_available_strikes(symbol):
     if df.empty:
         return []
 
-    strikes = sorted(df["strike"].unique())
+    strikes = sorted(df["strike"].dropna().unique())
 
     # convert 2310000 → 23100
     strikes = [int(s / 100) for s in strikes]
@@ -78,11 +78,10 @@ def get_available_strikes(symbol):
 
 
 # ==========================================
-# GET NEAREST EXPIRY (🔥 FIXED)
+# GET NEAREST EXPIRY
 # ==========================================
 def get_nearest_expiry(df):
-
-    expiries = df["expiry"].unique()
+    expiries = df["expiry"].dropna().unique()
 
     valid_expiries = []
 
@@ -107,7 +106,7 @@ def get_nearest_expiry(df):
 
 
 # ==========================================
-# FIND OPTION TOKEN (🔥 FINAL FIX)
+# FIND OPTION TOKEN
 # ==========================================
 def find_option(symbol, strike, option_type, selected_expiry=None):
 
@@ -122,17 +121,12 @@ def find_option(symbol, strike, option_type, selected_expiry=None):
         print("❌ NO DATA:", symbol)
         return None
 
-    # 🔥 USE USER SELECTED EXPIRY (if given)
-    if selected_expiry:
-        expiry = selected_expiry
-        print("📌 USING USER EXPIRY:", expiry)
-    else:
-        expiry = get_nearest_expiry(df)
-        print("🔥 AUTO EXPIRY:", expiry)
-
-    if not expiry:
-        print("❌ NO VALID EXPIRY")
+    # 🔥 STRICT: MUST HAVE EXPIRY
+    if not selected_expiry:
+        print("❌ EXPIRY REQUIRED")
         return None
+
+    expiry = selected_expiry.upper()
 
     target = int(strike * 100)
 
@@ -154,3 +148,34 @@ def find_option(symbol, strike, option_type, selected_expiry=None):
         "symbol": row["symbol"],
         "token": row["token"]
     }
+
+
+# ==========================================
+# GET LOT SIZE (🔥 FINAL CORRECT)
+# ==========================================
+def get_lot_size(symbol, expiry=None):
+    df = load_instruments()
+
+    df["name"] = df["name"].str.upper()
+    df = df[df["name"] == symbol.upper()]
+
+    if expiry:
+        df = df[df["expiry"] == expiry]
+
+    if df.empty:
+        print("❌ LOT SIZE NOT FOUND")
+        return None
+
+    try:
+        # take first valid row
+        row = df.iloc[0]
+
+        lot_size = int(float(row["lotsize"]))
+
+        print(f"📦 LOT SIZE ({symbol}):", lot_size)
+
+        return lot_size
+
+    except Exception as e:
+        print("❌ LOT SIZE ERROR:", e)
+        return None

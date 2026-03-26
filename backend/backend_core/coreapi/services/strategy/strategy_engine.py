@@ -9,6 +9,7 @@ Path: backend/coreapi/services/strategy/strategy_engine.py
 
 import math
 from ..capital_risk_engine import get_capital_summary, get_traffic_signal
+from ..instruments import get_lot_size  # ✅ SINGLE SOURCE
 from ..greeks_engine import compute_greeks as calculate_greeks
 from .payoff_engine import calculate_payoff, calculate_summary
 
@@ -62,20 +63,6 @@ STRATEGIES = {
 }
 
 # ============================================================
-# LOT SIZES
-# ============================================================
-
-LOT_SIZE_MAP = {
-    "NIFTY": 75, "BANKNIFTY": 30, "FINNIFTY": 65,
-    "MIDCPNIFTY": 120, "SENSEX": 20,
-}
-
-
-def get_lot_size(symbol):
-    return LOT_SIZE_MAP.get(symbol.upper(), 75)
-
-
-# ============================================================
 # REAL LTP FROM CHAIN
 # ============================================================
 
@@ -92,7 +79,6 @@ def get_real_ltp(chain, strike, option_type):
             if ltp is not None and float(ltp) > 0:
                 return float(ltp)
     return 0.0
-
 
 def get_nearest_strike_ltp(chain, target_strike, option_type, fallback=100.0):
     """Get LTP of nearest available strike if exact not found."""
@@ -113,7 +99,6 @@ def get_nearest_strike_ltp(chain, target_strike, option_type, fallback=100.0):
         ))
         return float(closest["ltp"])
     return fallback
-
 
 # ============================================================
 # STRATEGY SELECTOR
@@ -186,7 +171,6 @@ def select_strategy(capital, trend, iv_percentile, dte=15):
     best_key, best = sorted(candidates, key=lambda x: x[1]["min_capital"], reverse=True)[0]
     return {"key": best_key, **best}
 
-
 # ============================================================
 # BUILD STRIKES
 # ============================================================
@@ -194,15 +178,14 @@ def select_strategy(capital, trend, iv_percentile, dte=15):
 def build_strikes(atm, step=50):
     atm = float(atm)
     return {
-        "atm":     atm,
-        "atm_ce":  atm,
-        "atm_pe":  atm,
-        "otm1_ce": atm + step,
-        "otm2_ce": atm + step * 2,
-        "otm1_pe": atm - step,
-        "otm2_pe": atm - step * 2,
+        "atm":      atm,
+        "atm_ce":   atm,
+        "atm_pe":   atm,
+        "otm1_ce":  atm + step,
+        "otm2_ce":  atm + step * 2,
+        "otm1_pe":  atm - step,
+        "otm2_pe":  atm - step * 2,
     }
-
 
 # ============================================================
 # BUILD LEGS WITH REAL LTP
@@ -250,23 +233,22 @@ def build_legs(strategy_key, strikes, ltp_map, lot_size, chain=None, symbol="NIF
     }
 
     raw_legs = leg_defs.get(strategy_key, [])
-    legs     = []
+    legs      = []
 
     for action, opt_type, strike, ltp in raw_legs:
         sign = 1 if action == "BUY" else -1
         legs.append({
-            "action":        action,
-            "type":          opt_type,
-            "strike":        strike,
-            "ltp":           round(ltp, 2),
-            "lots":          1,
-            "lot_size":      lot_size,
-            "cost":          round(sign * ltp * lot_size, 2),
-            "display_price": round(ltp, 2),
+            "action":         action,
+            "type":           opt_type,
+            "strike":         strike,
+            "ltp":            round(ltp, 2),
+            "lots":           1,
+            "lot_size":       lot_size,  # ✅ DYNAMIC SINGLE SOURCE
+            "cost":           round(sign * ltp * lot_size, 2),
+            "display_price":  round(ltp, 2),
         })
 
     return legs
-
 
 # ============================================================
 # NET PREMIUM
@@ -279,7 +261,6 @@ def calculate_net_premium(legs):
         "type":        "DEBIT" if total > 0 else "CREDIT",
         "label":       f"{'Pay' if total > 0 else 'Receive'} ₹{abs(total):,.2f}",
     }
-
 
 # ============================================================
 # REAL PAYOFF
@@ -299,7 +280,6 @@ def build_real_payoff(legs, atm, step, symbol):
     ]
     return calculate_payoff(payoff_legs, symbol)
 
-
 # ============================================================
 # MAIN ENGINE
 # ============================================================
@@ -307,17 +287,18 @@ def build_real_payoff(legs, atm, step, symbol):
 def run_strategy_engine(
     capital, trend, iv_percentile, atm_price,
     ltp_map, symbol="NIFTY", step=50, chain=None,
-    dte=15,
+    dte=15, expiry=None,  # ✅ Added expiry param
 ):
     symbol   = symbol.upper()
-    lot_size = get_lot_size(symbol)
+    lot_size = get_lot_size(symbol, expiry)  # ✅ SINGLE SOURCE WITH EXPIRY
+    
+    print(f"[STRATEGY] {symbol} expiry={expiry} lot_size={lot_size} capital={capital} trend={trend} "
+          f"iv={iv_percentile} atm={atm_price} dte={dte}")
+
     atm      = round(float(atm_price) / step) * step
 
-    print(f"[STRATEGY] {symbol} capital={capital} trend={trend} "
-          f"iv={iv_percentile} atm={atm} dte={dte}")
-
-    # Capital summary
-    capital_data = get_capital_summary(capital, {symbol: ltp_map})
+    # Capital summary with symbol+expiry
+    capital_data = get_capital_summary(capital, symbol, expiry, {symbol: ltp_map})
 
     # Select strategy
     strategy = select_strategy(capital, trend, iv_percentile, dte)
@@ -326,14 +307,15 @@ def run_strategy_engine(
             "error": True,
             "message": "No suitable strategy. Increase capital or wait for clearer market trend.",
             "capital_data": capital_data,
+            "lot_size": lot_size,  # ✅ SINGLE SOURCE
         }
 
-    print(f"[STRATEGY] Selected: {strategy['name']}")
+    print(f"[STRATEGY] Selected: {strategy['name']} (lot_size: {lot_size})")
 
     # Build strikes
     strikes = build_strikes(atm, step)
 
-    # Build legs with REAL LTP
+    # Build legs with REAL LTP + CORRECT lot_size
     legs        = build_legs(strategy["key"], strikes, ltp_map, lot_size, chain, symbol)
     net_premium = calculate_net_premium(legs)
     signal      = get_traffic_signal(capital, strategy["risk"])
@@ -360,10 +342,11 @@ def run_strategy_engine(
         "trend":          trend,
         "iv_percentile":  iv_percentile,
         "atm_price":      atm,
-        "lot_size":       lot_size,
-        "strategy":       strategy,
+        "lot_size":       lot_size,  # ✅ SINGLE SOURCE TOP LEVEL
+        "expiry":         expiry,
+        "strategy":       strategy,  # ✅ NO lot_size here
         "strikes":        strikes,
-        "legs":           legs,
+        "legs":           legs,     # ✅ Uses dynamic lot_size
         "net_premium":    net_premium,
         "traffic_signal": signal,
         "greeks":         greeks,

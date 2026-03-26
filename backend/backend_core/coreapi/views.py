@@ -35,18 +35,17 @@ from coreapi.services.capital_risk_engine import get_capital_summary as capital_
 from coreapi.services.dynamic_risk_engine import DynamicRiskEngine
 from coreapi.services.strategy.strategy_engine import run_strategy_engine
 from coreapi.services.investment_planner_engine import investment_planner_engine
+from coreapi.services.instruments import get_lot_size
 
 from coreapi.services.time_engine import time_to_expiry
 from coreapi.services.iv_engine import classify_iv
-
+from coreapi.services.options.angel_greeks_service import get_real_greeks_for_strategy
 from coreapi.services.options.angel_greeks_service import (
     get_option_greeks,
     process_greeks,
-    get_nearest_expiry_date,
-    get_monthly_expiry,
     format_expiry_display,
     get_days_to_expiry,
-    get_real_greeks_for_strategy,
+   
 )
 from coreapi.services.options.local_greeks_chain import build_greeks_chain
 from coreapi.services.options.option_ltp import get_option_ltp_from_chain
@@ -59,16 +58,18 @@ from coreapi.services.strategy.payoff_engine import calculate_payoff, calculate_
 LAST_OPTION_CHAIN = {}
 
 
-def get_market_data(symbol):
+def get_market_data(symbol, expiry=None):
     global LAST_OPTION_CHAIN
     try:
-        data = get_option_chain(symbol)
+        data = get_option_chain(symbol, expiry)
         if data:
-            LAST_OPTION_CHAIN[symbol] = data
+            key = f"{symbol}_{expiry}" if expiry else symbol
+            LAST_OPTION_CHAIN[key] = data
             return data
     except Exception:
         pass
-    return LAST_OPTION_CHAIN.get(symbol, [])
+    key = f"{symbol}_{expiry}" if expiry else symbol
+    return LAST_OPTION_CHAIN.get(key, [])
 
 
 # =========================================================
@@ -246,6 +247,8 @@ def smartrisk_view(request):
 
     symbol  = request.GET.get("symbol",  "NIFTY").upper()
     capital = float(request.GET.get("capital", 25000))
+    selected_expiry = request.GET.get("expiry", None)
+    print("🔥 FRONTEND EXPIRY:", selected_expiry)
 
     # ── Step size
     step = 100 if symbol == "BANKNIFTY" else 50
@@ -261,24 +264,30 @@ def smartrisk_view(request):
     print(f"\n[SMARTRISK] ── {symbol} ──────────────────")
     print(f"[SMARTRISK] spot={spot}  capital={capital}")
 
-    # ── Step 2: Real option chain (parallel fetch, cached)
-    chain = get_market_data(symbol)
-    if not chain:
-        return Response({
-            "error": True,
-            "message": "No option chain data available. Try again in 30 seconds."
-        })
-
     # ── Step 3: ATM strike (correctly rounded)
     atm = round(spot / step) * step
     print(f"[SMARTRISK] ATM={atm}")
 
     # ── Step 4: Expiry (auto-detected from chain or computed)
-    expiry         = get_nearest_expiry(symbol)
+    # ✅ USE FRONTEND EXPIRY IF PROVIDED
+    if selected_expiry:
+        expiry = selected_expiry.upper()
+    else:
+        expiry = get_nearest_expiry(symbol)
+
     expiry_display = format_expiry_display(expiry)
     days_to_expiry = get_days_to_expiry(expiry)
+    lot_size = get_lot_size(symbol, expiry)
 
-    print(f"[SMARTRISK] expiry={expiry}  dte={days_to_expiry}")
+    print(f"[SMARTRISK] FINAL EXPIRY={expiry}  dte={days_to_expiry}")
+
+    # ── Step 2: Real option chain (parallel fetch, cached)
+    chain = get_market_data(symbol, expiry)
+    if not chain:
+        return Response({
+            "error": True,
+            "message": "No option chain data available. Try again in 30 seconds."
+        })
 
     # ── Step 5: Real LTP map from chain
     ltp_map = get_real_ltp_map(chain, atm, symbol)
@@ -424,7 +433,7 @@ def smartrisk_view(request):
         # ATM
         "atm_price":      atm,
         "atm_used":       atm,
-        "lot_size":       strategy_data.get("lot_size", 75),
+        "lot_size": lot_size,
 
         # Strategy
         "strategy":       strategy_data.get("strategy"),
@@ -624,34 +633,62 @@ def test_option_price(request):
 # =========================================================
 # FULL OPTION CHAIN
 # =========================================================
+# =========================================================
+# FULL OPTION CHAIN (🔥 FIXED VERSION)
+# =========================================================
 @api_view(["GET"])
 def full_option_chain_view(request):
     symbol = request.GET.get("symbol", "NIFTY").upper()
+    expiry_param = request.GET.get("expiry", None)
+
+    # ✅ FIX: Respect frontend expiry
+    if expiry_param:
+        expiry = expiry_param.upper()
+        print("📥 FRONTEND EXPIRY:", expiry)
+    else:
+        expiry = get_nearest_expiry(symbol)
+        print("⚠️ USING AUTO EXPIRY:", expiry)
 
     try:
-        spot   = get_ltp(symbol)
-        chain  = get_market_data(symbol)
-        expiry = get_nearest_expiry(symbol)
+        spot = get_ltp(symbol)
+
+        print("🔥 FINAL EXPIRY USED:", expiry)
+
+        # ✅ Pass expiry correctly
+        chain = get_market_data(symbol, expiry)
 
         if not chain:
-            return Response({"error": "No option chain data"})
+            return Response({
+                "error": "No option chain data",
+                "debug": {
+                    "symbol": symbol,
+                    "expiry": expiry
+                }
+            })
 
+        # Clean + sort
         clean = sorted(
             [x for x in chain if x.get("ltp") is not None],
             key=lambda x: float(x.get("strike", 0))
         )
 
         return Response({
-            "symbol":         symbol,
-            "spot":           spot,
-            "expiry":         expiry,
+            "symbol": symbol,
+            "spot": spot,
+            "expiry": expiry,
             "expiry_display": format_expiry_display(expiry),
-            "total_strikes":  len(clean),
-            "data":           clean,
+            "total_strikes": len(clean),
+            "data": clean,
         })
 
     except Exception as e:
-        return Response({"error": str(e)})
+        return Response({
+            "error": str(e),
+            "debug": {
+                "symbol": symbol,
+                "expiry": expiry
+            }
+        })
 
 
 # =========================================================
@@ -681,15 +718,17 @@ def ai_strategy_view(request):
 @api_view(["GET"])
 def payoff_view(request):
     symbol = request.GET.get("symbol", "NIFTY").upper()
+    expiry = request.GET.get("expiry")
+    print("📥 FRONTEND EXPIRY:", expiry)
     spot   = get_ltp(symbol)
-    chain  = get_market_data(symbol)
+    chain  = get_market_data(symbol, expiry)
 
     if not chain:
         return Response({"error": "No option data"})
 
     step   = 100 if symbol == "BANKNIFTY" else 50
     atm    = round(spot / step) * step
-    expiry = get_nearest_expiry(symbol)
+    expiry = expiry or get_nearest_expiry(symbol)
 
     strikes = sorted(set([
         float(x.get("strike", x.get("strikePrice", 0))) for x in chain
@@ -697,7 +736,7 @@ def payoff_view(request):
     if not strikes:
         return Response({"error": "No strikes found"})
 
-    def find_option(strike, typ):
+    def find_option(strike, typ, expiry):
         for x in chain:
             s = int(float(x.get("strike", x.get("strikePrice", 0))))
             t = x.get("option_type") or x.get("optionType")
@@ -719,10 +758,10 @@ def payoff_view(request):
     if ce_buy_strike == ce_sell_strike:
         ce_buy_strike = min(strikes, key=lambda x: abs(x - (ce_sell_strike + step * 2)))
 
-    pe_sell = find_option(pe_sell_strike, "PE")
-    pe_buy  = find_option(pe_buy_strike,  "PE")
-    ce_sell = find_option(ce_sell_strike, "CE")
-    ce_buy  = find_option(ce_buy_strike,  "CE")
+    pe_sell = find_option(pe_sell_strike, "PE", expiry)
+    pe_buy  = find_option(pe_buy_strike,  "PE", expiry)
+    ce_sell = find_option(ce_sell_strike, "CE", expiry)
+    ce_buy  = find_option(ce_buy_strike,  "CE", expiry)
 
     if not all([pe_sell, pe_buy, ce_sell, ce_buy]):
         return Response({
@@ -799,4 +838,46 @@ def expiry_info_view(request):
         "monthly_display": format_expiry_display(monthly),
         "days_to_weekly":  get_days_to_expiry(weekly),
         "days_to_monthly": get_days_to_expiry(monthly),
+    })
+# =========================================================
+# GET ALL VALID EXPIRIES (🔥 NEW)
+# =========================================================
+@api_view(["GET"])
+def get_expiries_view(request):
+    from coreapi.services.instruments import load_instruments
+    from datetime import datetime
+
+    symbol = request.GET.get("symbol", "NIFTY").upper()
+
+    df = load_instruments()
+
+    df["name"] = df["name"].str.upper()
+    df = df[df["name"] == symbol]
+
+    if df.empty:
+        return Response({"error": "No data for symbol"})
+
+    expiries = df["expiry"].unique()
+
+    valid = []
+
+    for exp in expiries:
+        try:
+            dt = datetime.strptime(exp, "%d%b%Y")
+
+            # only future expiries
+            if dt >= datetime.today():
+                valid.append((dt, exp))
+        except:
+            continue
+
+    # sort ascending
+    valid.sort()
+
+    # only take first 10
+    final = [e[1] for e in valid[:10]]
+
+    return Response({
+        "symbol": symbol,
+        "expiries": final
     })

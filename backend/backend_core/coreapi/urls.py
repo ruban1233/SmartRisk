@@ -4,6 +4,7 @@ Path: backend/coreapi/urls.py
 """
 
 from django.urls import path
+from .views import get_expiries_view
 from coreapi import views
 
 urlpatterns = [
@@ -26,4 +27,5 @@ urlpatterns = [
 
     # ✅ NEW — Auto expiry info
     path("expiry/",                views.expiry_info_view),
+    path("expiries/", get_expiries_view),
 ]

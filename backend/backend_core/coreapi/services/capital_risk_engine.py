@@ -1,8 +1,3 @@
-"""
-capital_risk_engine.py
-Path: backend/coreapi/services/capital_risk_engine.py
-"""
-
 # ============================================================
 # CAPITAL RISK ENGINE — SMART RISK AI
 # ============================================================
@@ -10,17 +5,12 @@ Path: backend/coreapi/services/capital_risk_engine.py
 #   - Investor level (BEGINNER / PROFESSIONAL / EXPERT)
 #   - Max capital to deploy per trade
 #   - Strategy eligibility by capital
-#   - Lot affordability (NIFTY + BANKNIFTY 2026 lot sizes)
+#   - Lot affordability (DYNAMIC from instruments.py)
 #   - Risk per trade (% based)
 #   - Traffic light signal
 # ============================================================
 
-LOT_SIZES = {
-    "NIFTY":     25,
-    "BANKNIFTY": 15,
-    "FINNIFTY":  40,
-    "MIDCPNIFTY": 75,
-}
+from coreapi.services.instruments import get_lot_size
 
 STRATEGY_CAPITAL_MAP = [
     {
@@ -81,7 +71,6 @@ STRATEGY_CAPITAL_MAP = [
     },
 ]
 
-
 def get_investor_level(capital: float) -> dict:
     if capital < 10_000:
         return {
@@ -112,7 +101,6 @@ def get_investor_level(capital: float) -> dict:
             "message": "Advanced portfolio. All strategies including Short Straddle available."
         }
 
-
 def get_traffic_signal(capital: float, strategy_risk: str) -> dict:
     level = get_investor_level(capital)["level"]
 
@@ -133,7 +121,6 @@ def get_traffic_signal(capital: float, strategy_risk: str) -> dict:
 
     return {"signal": "GREEN", "color": "#22c55e", "message": "Capital sufficient for this strategy."}
 
-
 def get_eligible_strategies(capital: float) -> list:
     eligible = []
     for s in STRATEGY_CAPITAL_MAP:
@@ -141,8 +128,7 @@ def get_eligible_strategies(capital: float) -> list:
             eligible.append(s)
     return eligible
 
-
-def get_lot_affordability(capital: float, ltp_map: dict) -> list:
+def get_lot_affordability(capital: float, symbol: str, expiry: str, ltp_map: dict) -> list:
     """
     ltp_map = {
         "NIFTY":     {"ce_ltp": 120.0, "pe_ltp": 95.0},
@@ -153,36 +139,37 @@ def get_lot_affordability(capital: float, ltp_map: dict) -> list:
     result = []
     deploy_capital = capital * 0.30  # Use 30% of capital for options
 
-    for symbol, lot_size in LOT_SIZES.items():
-        if symbol not in ltp_map:
-            continue
+    # ✅ SINGLE SOURCE OF TRUTH
+    lot_size = get_lot_size(symbol, expiry)
+    
+    if symbol not in ltp_map:
+        return []
 
-        ce_ltp = ltp_map[symbol].get("ce_ltp", 0)
-        pe_ltp = ltp_map[symbol].get("pe_ltp", 0)
+    ce_ltp = ltp_map[symbol].get("ce_ltp", 0)
+    pe_ltp = ltp_map[symbol].get("pe_ltp", 0)
 
-        if ce_ltp <= 0 and pe_ltp <= 0:
-            continue
+    if ce_ltp <= 0 and pe_ltp <= 0:
+        return []
 
-        avg_premium = (ce_ltp + pe_ltp) / 2 if (ce_ltp > 0 and pe_ltp > 0) else max(ce_ltp, pe_ltp)
-        cost_per_lot = avg_premium * lot_size
+    avg_premium = (ce_ltp + pe_ltp) / 2 if (ce_ltp > 0 and pe_ltp > 0) else max(ce_ltp, pe_ltp)
+    cost_per_lot = avg_premium * lot_size
 
-        if cost_per_lot <= 0:
-            continue
+    if cost_per_lot <= 0:
+        return []
 
-        max_lots = int(deploy_capital / cost_per_lot)
-        result.append({
-            "symbol":        symbol,
-            "lot_size":      lot_size,
-            "ce_ltp":        ce_ltp,
-            "pe_ltp":        pe_ltp,
-            "cost_per_lot":  round(cost_per_lot, 2),
-            "max_lots":      max_lots,
-            "deploy_capital": round(deploy_capital, 2),
-            "affordable":    max_lots >= 1,
-        })
+    max_lots = int(deploy_capital / cost_per_lot)
+    result.append({
+        "symbol":         symbol,
+        "lot_size":       lot_size,  # ✅ DYNAMIC
+        "ce_ltp":         ce_ltp,
+        "pe_ltp":         pe_ltp,
+        "cost_per_lot":   round(cost_per_lot, 2),
+        "max_lots":       max_lots,
+        "deploy_capital": round(deploy_capital, 2),
+        "affordable":     max_lots >= 1,
+    })
 
     return result
-
 
 def get_risk_per_trade(capital: float) -> dict:
     """
@@ -204,14 +191,13 @@ def get_risk_per_trade(capital: float) -> dict:
     max_loss = capital * (pct / 100)
 
     return {
-        "level":       level,
-        "risk_pct":    pct,
-        "max_loss_per_trade": round(max_loss, 2),
-        "message":     f"Risk {pct}% per trade = ₹{max_loss:,.2f} max loss per trade."
+        "level":                level,
+        "risk_pct":             pct,
+        "max_loss_per_trade":   round(max_loss, 2),
+        "message":              f"Risk {pct}% per trade = ₹{max_loss:,.2f} max loss per trade."
     }
 
-
-def get_capital_summary(capital: float, ltp_map: dict = None) -> dict:
+def get_capital_summary(capital: float, symbol: str, expiry: str, ltp_map: dict = None) -> dict:
     """
     MAIN FUNCTION — call this from views.py
     Returns full capital analysis.
@@ -219,22 +205,22 @@ def get_capital_summary(capital: float, ltp_map: dict = None) -> dict:
     if ltp_map is None:
         ltp_map = {}
 
-    investor      = get_investor_level(capital)
-    strategies    = get_eligible_strategies(capital)
+    investor       = get_investor_level(capital)
+    strategies     = get_eligible_strategies(capital)
     risk_per_trade = get_risk_per_trade(capital)
-    lot_afford    = get_lot_affordability(capital, ltp_map)
+    lot_afford     = get_lot_affordability(capital, symbol, expiry, ltp_map)
 
     best_strategy = strategies[-1] if strategies else None
     signal        = get_traffic_signal(capital, best_strategy["risk"] if best_strategy else "HIGH")
 
     return {
-        "capital":          capital,
-        "investor_level":   investor,
-        "traffic_signal":   signal,
-        "risk_per_trade":   risk_per_trade,
+        "capital":           capital,
+        "investor_level":    investor,
+        "traffic_signal":    signal,
+        "risk_per_trade":    risk_per_trade,
         "eligible_strategies": strategies,
-        "best_strategy":    best_strategy,
+        "best_strategy":     best_strategy,
         "lot_affordability": lot_afford,
-        "deploy_capital":   round(capital * 0.30, 2),
-        "reserve_capital":  round(capital * 0.70, 2),
+        "deploy_capital":    round(capital * 0.30, 2),
+        "reserve_capital":   round(capital * 0.70, 2),
     }
